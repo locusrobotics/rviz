@@ -237,8 +237,8 @@ private:
   {
     boost::shared_ptr<M const> const& msg = msg_evt.getConstMessage();
     const std::string& authority = msg_evt.getPublisherName();
-
-    messageArrived(msg->header.frame_id, msg->header.stamp, authority, display);
+    messageArrived(ros::message_traits::FrameId<M>::value(*msg),
+                   ros::message_traits::TimeStamp<M>::value(*msg), authority, display);
   }
 
   template <class M, class TfFilterFailureReasonType>
@@ -249,7 +249,8 @@ private:
     boost::shared_ptr<M const> const& msg = msg_evt.getConstMessage();
     const std::string& authority = msg_evt.getPublisherName();
 
-    messageFailed(msg->header.frame_id, msg->header.stamp, authority, reason, display);
+    messageFailed(ros::message_traits::FrameId<M>::value(*msg),
+                  ros::message_traits::TimeStamp<M>::value(*msg), authority, reason, display);
   }
 
   void messageArrived(const std::string& frame_id,
