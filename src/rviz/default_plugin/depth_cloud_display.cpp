@@ -27,6 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <QObject>
+#include <QRegularExpression>
 
 #include "depth_cloud_display.h"
 #include <rviz/visualization_manager.h>
@@ -41,7 +42,7 @@
 
 #include <tf2_ros/buffer.h>
 
-#include <boost/bind.hpp>
+#include <boost/bind/bind.hpp>
 #include <boost/algorithm/string/erase.hpp>
 #include <boost/foreach.hpp>
 #include <boost/shared_ptr.hpp>
@@ -78,42 +79,41 @@ DepthCloudDisplay::DepthCloudDisplay()
 
 {
   // Depth map properties
-  QRegExp depth_filter("depth");
-  depth_filter.setCaseSensitivity(Qt::CaseInsensitive);
+  QRegularExpression depth_filter("depth", QRegularExpression::CaseInsensitiveOption);
 
   topic_filter_property_ =
       new Property("Topic Filter", true,
                    "List only topics with names that relate to depth and color images", this,
-                   SLOT(updateTopicFilter()));
+                   &DepthCloudDisplay::updateTopicFilter);
 
   depth_topic_property_ = new RosFilteredTopicProperty(
       "Depth Map Topic", "", QString::fromStdString(ros::message_traits::datatype<sensor_msgs::Image>()),
-      "sensor_msgs::Image topic to subscribe to.", depth_filter, this, SLOT(updateTopic()));
+      "sensor_msgs::Image topic to subscribe to.", depth_filter, this, &DepthCloudDisplay::updateTopic);
 
   depth_transport_property_ =
       new EnumProperty("Depth Map Transport Hint", "raw", "Preferred method of sending images.", this,
-                       SLOT(updateTopic()));
+                       &DepthCloudDisplay::updateTopic);
 
-  connect(depth_transport_property_, SIGNAL(requestOptions(EnumProperty*)), this,
-          SLOT(fillTransportOptionList(EnumProperty*)));
+  connect(depth_transport_property_, &EnumProperty::requestOptions, this,
+          &DepthCloudDisplay::fillTransportOptionList);
 
   depth_transport_property_->setStdString("raw");
 
   // color image properties
-  QRegExp color_filter("color|rgb|bgr|gray|mono");
-  color_filter.setCaseSensitivity(Qt::CaseInsensitive);
+  QRegularExpression color_filter("color|rgb|bgr|gray|mono", QRegularExpression::CaseInsensitiveOption);
 
   color_topic_property_ = new RosFilteredTopicProperty(
       "Color Image Topic", "",
       QString::fromStdString(ros::message_traits::datatype<sensor_msgs::Image>()),
-      "sensor_msgs::Image topic to subscribe to.", color_filter, this, SLOT(updateTopic()));
+      "sensor_msgs::Image topic to subscribe to.", color_filter, this, &DepthCloudDisplay::updateTopic);
 
-  color_transport_property_ = new EnumProperty(
-      "Color Transport Hint", "raw", "Preferred method of sending images.", this, SLOT(updateTopic()));
+  color_transport_property_ =
+      new EnumProperty("Color Transport Hint", "raw", "Preferred method of sending images.", this,
+                       &DepthCloudDisplay::updateTopic);
 
 
-  connect(color_transport_property_, SIGNAL(requestOptions(EnumProperty*)), this,
-          SLOT(fillTransportOptionList(EnumProperty*)));
+  connect(color_transport_property_, &EnumProperty::requestOptions, this,
+          &DepthCloudDisplay::fillTransportOptionList);
 
   color_transport_property_->setStdString("raw");
 
@@ -123,29 +123,30 @@ DepthCloudDisplay::DepthCloudDisplay()
                       "Advanced: set the size of the incoming message queue.  Increasing this "
                       "is useful if your incoming TF data is delayed significantly from your"
                       " image data, but it can greatly increase memory usage if the messages are big.",
-                      this, SLOT(updateQueueSize()));
+                      this, &DepthCloudDisplay::updateQueueSize);
   queue_size_property_->setMin(1);
 
   use_auto_size_property_ = new BoolProperty(
       "Auto Size", true,
       "Automatically scale each point based on its depth value and the camera parameters.", this,
-      SLOT(updateUseAutoSize()), this);
+      &DepthCloudDisplay::updateUseAutoSize, this);
 
   auto_size_factor_property_ =
       new FloatProperty("Auto Size Factor", 1, "Scaling factor to be applied to the auto size.",
-                        use_auto_size_property_, SLOT(updateAutoSizeFactor()), this);
+                        use_auto_size_property_, &DepthCloudDisplay::updateAutoSizeFactor, this);
   auto_size_factor_property_->setMin(0.0001);
 
   use_occlusion_compensation_property_ =
       new BoolProperty("Occlusion Compensation", false,
                        "Keep points alive after they have been occluded by a closer point. Points are "
                        "removed after a timeout or when the camera frame moves.",
-                       this, SLOT(updateUseOcclusionCompensation()), this);
+                       this, &DepthCloudDisplay::updateUseOcclusionCompensation, this);
 
   occlusion_shadow_timeout_property_ =
       new FloatProperty("Occlusion Time-Out", 30.0f,
                         "Amount of seconds before removing occluded points from the depth cloud",
-                        use_occlusion_compensation_property_, SLOT(updateOcclusionTimeOut()), this);
+                        use_occlusion_compensation_property_, &DepthCloudDisplay::updateOcclusionTimeOut,
+                        this);
 }
 
 void DepthCloudDisplay::onInitialize()
@@ -158,10 +159,6 @@ void DepthCloudDisplay::onInitialize()
 
   updateUseAutoSize();
   updateUseOcclusionCompensation();
-
-  // PointCloudCommon sets up a callback queue with a thread for each
-  // instance.  Use that for processing incoming messages.
-  threaded_nh_.setCallbackQueue(pointcloud_common_->getCallbackQueue());
 
   // Scan for available transport plugins
   scanForTransportSubscriberPlugins();
@@ -306,7 +303,8 @@ void DepthCloudDisplay::subscribe()
       // subscribe to CameraInfo  topic
       std::string info_topic = image_transport::getCameraInfoTopic(depthmap_topic);
       cam_info_sub_->subscribe(threaded_nh_, info_topic, queue_size_);
-      cam_info_sub_->registerCallback(boost::bind(&DepthCloudDisplay::caminfoCallback, this, _1));
+      cam_info_sub_->registerCallback(
+          boost::bind(&DepthCloudDisplay::caminfoCallback, this, boost::placeholders::_1));
 
       if (!color_topic.empty() && !color_transport.empty())
       {
@@ -318,14 +316,15 @@ void DepthCloudDisplay::subscribe()
         sync_depth_color_->connectInput(*depthmap_tf_filter_, *rgb_sub_);
         sync_depth_color_->setInterMessageLowerBound(0, ros::Duration(0.5));
         sync_depth_color_->setInterMessageLowerBound(1, ros::Duration(0.5));
-        sync_depth_color_->registerCallback(
-            boost::bind(&DepthCloudDisplay::processMessage, this, _1, _2));
+        sync_depth_color_->registerCallback(boost::bind(
+            &DepthCloudDisplay::processMessage, this, boost::placeholders::_1, boost::placeholders::_2));
 
         pointcloud_common_->color_transformer_property_->setValue("RGB8");
       }
       else
       {
-        depthmap_tf_filter_->registerCallback(boost::bind(&DepthCloudDisplay::processMessage, this, _1));
+        depthmap_tf_filter_->registerCallback(
+            boost::bind(&DepthCloudDisplay::processMessage, this, boost::placeholders::_1));
       }
     }
   }
@@ -367,16 +366,12 @@ void DepthCloudDisplay::unsubscribe()
 
 void DepthCloudDisplay::clear()
 {
-  boost::mutex::scoped_lock lock(mutex_);
-
   pointcloud_common_->reset();
 }
 
 
 void DepthCloudDisplay::update(float wall_dt, float ros_dt)
 {
-  boost::mutex::scoped_lock lock(mutex_);
-
   pointcloud_common_->update(wall_dt, ros_dt);
 }
 

@@ -48,14 +48,14 @@ static const QString ANY_AXIS("arbitrary");
 // helper function to create axis strings from option ID
 inline QString fmtAxis(int i)
 {
-  return QStringLiteral("%1%2 axis").arg(QChar(i % 2 ? '+' : '-')).arg(QChar('x' + (i - 1) / 2));
+  return QString("%1%2 axis").arg(QChar(i % 2 ? '+' : '-')).arg(QChar('x' + (i - 1) / 2));
 }
 
 FrameViewController::FrameViewController()
 {
   axis_property_ = new EnumProperty("Point towards", fmtAxis(6),
                                     "Point the camera along the given axis of the frame.", nullptr,
-                                    SLOT(changedAxis()), this);
+                                    &FrameViewController::changedAxis, this);
   axis_property_->addOption(ANY_AXIS, -1);
   this->addChild(axis_property_, yaw_property_->rowNumberInParent());
   // x,y,z axes get integers from 1..6: +x, -x, +y, -y, +z, -z

@@ -40,17 +40,20 @@
  */
 
 #include "movable_text.h"
+#include <rviz/ogre_helpers/version_check.h>
 
-#include <OgreVector3.h>
+#include <rviz/ogre_helpers/ogre_vector.h>
 #include <OgreQuaternion.h>
 #include <OgreRoot.h>
 #include <OgreCamera.h>
 #include <OgreSceneNode.h>
 #include <OgreMaterialManager.h>
 #include <OgreHardwareBufferManager.h>
-#include <OgreFontManager.h>
-#include <OgreFont.h>
+#include <Overlay/OgreFontManager.h>
+#include <Overlay/OgreFont.h>
+#if (OGRE_VERSION < OGRE_VERSION_CHECK(13, 0, 0))
 #include <OgreUTFString.h>
+#endif
 
 #include <sstream>
 
@@ -214,7 +217,11 @@ void MovableText::showOnTop(bool show)
 
 void MovableText::_setupGeometry()
 {
+#if (OGRE_VERSION >= OGRE_VERSION_CHECK(13, 0, 0))
+  Ogre::String utfCaption(mCaption);
+#else
   Ogre::UTFString::utf32string utfCaption(Ogre::UTFString(mCaption).asUTF32());
+#endif
 
   assert(mpFont);
   assert(!mpMaterial.isNull());
@@ -237,7 +244,7 @@ void MovableText::_setupGeometry()
     mUpdateColors = true;
   }
 
-  if (utfCaption.empty())
+  if (vertexCount == 0)
   {
     return;
   }
@@ -461,6 +468,7 @@ void MovableText::_updateColors()
 {
   assert(mpFont);
   assert(!mpMaterial.isNull());
+  assert(mRenderOp.vertexData);
 
   // Convert to system-specific
   RGBA color;

@@ -33,7 +33,7 @@
 #include <OgreCamera.h>
 #include <OgreSceneManager.h>
 #include <OgreSceneNode.h>
-#include <OgreVector3.h>
+#include <rviz/ogre_helpers/ogre_vector.h>
 #include <OgreQuaternion.h>
 #include <OgreViewport.h>
 
@@ -63,7 +63,7 @@ OrbitCamera::OrbitCamera(Ogre::SceneManager* scene_manager)
   focal_point_object_->setColor(1.0f, 1.0f, 0.0f, 0.5f);
   focal_point_object_->getRootNode()->setVisible(false);
 
-  update();
+  OrbitCamera::update();
 }
 
 OrbitCamera::~OrbitCamera()

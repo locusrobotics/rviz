@@ -41,36 +41,46 @@
 
 namespace rviz
 {
-ImageDisplayBase::ImageDisplayBase() : Display(), sub_(), tf_filter_(), messages_received_(0)
+ImageDisplayBase::ImageDisplayBase()
+  : Display(), sub_(), tf_filter_(), messages_received_(0), last_received_(ros::Time())
 {
-  topic_property_ =
-      new RosTopicProperty("Image Topic", "",
-                           QString::fromStdString(ros::message_traits::datatype<sensor_msgs::Image>()),
-                           "sensor_msgs::Image topic to subscribe to.", this, SLOT(updateTopic()));
+  topic_property_ = new RosTopicProperty(
+      "Image Topic", "", QString::fromStdString(ros::message_traits::datatype<sensor_msgs::Image>()),
+      "sensor_msgs::Image topic to subscribe to.", this, &ImageDisplayBase::updateTopic);
 
   transport_property_ = new EnumProperty("Transport Hint", "raw", "Preferred method of sending images.",
-                                         this, SLOT(updateTopic()));
+                                         this, &ImageDisplayBase::updateTopic);
 
-  connect(transport_property_, SIGNAL(requestOptions(EnumProperty*)), this,
-          SLOT(fillTransportOptionList(EnumProperty*)));
+  connect(transport_property_, &EnumProperty::requestOptions, this,
+          &ImageDisplayBase::fillTransportOptionList);
 
   queue_size_property_ =
       new IntProperty("Queue Size", 2,
                       "Advanced: set the size of the incoming message queue.  Increasing this "
                       "is useful if your incoming TF data is delayed significantly from your"
                       " image data, but it can greatly increase memory usage if the messages are big.",
-                      this, SLOT(updateQueueSize()));
+                      this, &ImageDisplayBase::updateQueueSize);
   queue_size_property_->setMin(1);
 
   transport_property_->setStdString("raw");
 
-  unreliable_property_ =
-      new BoolProperty("Unreliable", false, "Prefer UDP topic transport", this, SLOT(updateTopic()));
+  unreliable_property_ = new BoolProperty("Unreliable", false, "Prefer UDP topic transport", this,
+                                          &ImageDisplayBase::updateTopic);
+
+  timeout_property_ =
+      new FloatProperty("Timeout", 1.0,
+                        "Seconds to wait before resetting when no new image has been received.\n"
+                        "Zero disables the feature.",
+                        this, &ImageDisplayBase::updateResetTimeout);
+
+  reset_timer_ = new QTimer(this);
+  connect(reset_timer_, &QTimer::timeout, this, &ImageDisplayBase::onResetTimer);
+  updateResetTimeout();
 }
 
 ImageDisplayBase::~ImageDisplayBase()
 {
-  unsubscribe();
+  ImageDisplayBase::unsubscribe();
 }
 
 void ImageDisplayBase::onInitialize()
@@ -114,6 +124,7 @@ void ImageDisplayBase::incomingMessage(const sensor_msgs::Image::ConstPtr& msg)
   setStatus(StatusProperty::Ok, "Image", QString::number(messages_received_) + " images received");
 
   emitTimeSignal(msg->header.stamp);
+  last_received_ = ros::Time::now();
 
   processMessage(msg);
 }
@@ -134,11 +145,12 @@ void ImageDisplayBase::reset()
   if (tf_filter_)
   {
     tf_filter_->clear();
-    update_nh_.getCallbackQueue()->removeByID((uint64_t)tf_filter_.get());
   }
 
   messages_received_ = 0;
   setStatus(StatusProperty::Warn, "Image", "No Image received");
+
+  last_received_ = ros::Time();
 }
 
 void ImageDisplayBase::updateQueueSize()
@@ -182,15 +194,18 @@ void ImageDisplayBase::subscribe()
 
       if (targetFrame_.empty())
       {
-        sub_->registerCallback(boost::bind(&ImageDisplayBase::incomingMessage, this, _1));
+        sub_->registerCallback(
+            boost::bind(&ImageDisplayBase::incomingMessage, this, boost::placeholders::_1));
       }
       else
       {
         tf_filter_.reset(new tf2_ros::MessageFilter<sensor_msgs::Image>(
             *sub_, *context_->getTF2BufferPtr(), targetFrame_, queue_size_property_->getInt(),
             update_nh_));
-        tf_filter_->registerCallback(boost::bind(&ImageDisplayBase::incomingMessage, this, _1));
-        tf_filter_->registerFailureCallback(boost::bind(&ImageDisplayBase::failedMessage, this, _1, _2));
+        tf_filter_->registerCallback(
+            boost::bind(&ImageDisplayBase::incomingMessage, this, boost::placeholders::_1));
+        tf_filter_->registerFailureCallback(boost::bind(
+            &ImageDisplayBase::failedMessage, this, boost::placeholders::_1, boost::placeholders::_2));
       }
     }
     setStatus(StatusProperty::Ok, "Topic", "OK");
@@ -207,10 +222,6 @@ void ImageDisplayBase::subscribe()
 
 void ImageDisplayBase::unsubscribe()
 {
-  // Quick fix for #1372. Can be removed if https://github.com/ros/geometry2/pull/402 is released
-  if (tf_filter_)
-    update_nh_.getCallbackQueue()->removeByID((uint64_t)tf_filter_.get());
-
   tf_filter_.reset();
   sub_.reset();
 }
@@ -264,6 +275,14 @@ void ImageDisplayBase::updateTopic()
   context_->queueRender();
 }
 
+void ImageDisplayBase::updateResetTimeout()
+{
+  if (timeout_property_->getFloat() > 0)
+    reset_timer_->start(33); // frequently check for receive timeout
+  else
+    reset_timer_->stop();
+}
+
 void ImageDisplayBase::fillTransportOptionList(EnumProperty* property)
 {
   property->clearOptions();
@@ -306,6 +325,13 @@ void ImageDisplayBase::fillTransportOptionList(EnumProperty* property)
   {
     property->addOptionStd(choices[i]);
   }
+}
+
+void ImageDisplayBase::onResetTimer()
+{
+  ros::Time last = last_received_;
+  if (!last.isZero() && ros::Time::now() > last + ros::Duration(timeout_property_->getFloat()))
+    reset();
 }
 
 } // end namespace rviz

@@ -58,7 +58,12 @@ using namespace rviz;
 ImageView::ImageView(QWidget* parent) : QtOgreRenderWindow(parent), texture_it_(nh_)
 {
   setAutoRender(false);
+#if (OGRE_VERSION < OGRE_VERSION_CHECK(13, 0, 0))
   scene_manager_ = ogre_root_->createSceneManager(Ogre::ST_GENERIC, "TestSceneManager");
+#else
+  scene_manager_ = ogre_root_->createSceneManager(Ogre::DefaultSceneManagerFactory::FACTORY_TYPE_NAME,
+                                                  "TestSceneManager");
+#endif
 }
 
 ImageView::~ImageView()
@@ -94,7 +99,8 @@ void ImageView::showEvent(QShowEvent* event)
 
     texture_sub_.reset(new image_transport::SubscriberFilter());
     texture_sub_->subscribe(texture_it_, "image", 1, image_transport::TransportHints("raw"));
-    texture_sub_->registerCallback(boost::bind(&ImageView::textureCallback, this, _1));
+    texture_sub_->registerCallback(
+        boost::bind(&ImageView::textureCallback, this, boost::placeholders::_1));
   }
   catch (ros::Exception& e)
   {
@@ -109,6 +115,7 @@ void ImageView::showEvent(QShowEvent* event)
   Ogre::TextureUnitState* tu = material->getTechnique(0)->getPass(0)->createTextureUnitState();
   tu->setTextureName(texture_->getTexture()->getName());
   tu->setTextureFiltering(Ogre::TFO_NONE);
+  tu->setTextureAddressingMode(Ogre::TextureUnitState::TAM_CLAMP);
 
   Ogre::Rectangle2D* rect = new Ogre::Rectangle2D(true);
   rect->setCorners(-1.0f, 1.0f, 1.0f, -1.0f);
@@ -123,7 +130,7 @@ void ImageView::showEvent(QShowEvent* event)
   node->setVisible(true);
 
   QTimer* timer = new QTimer(this);
-  connect(timer, SIGNAL(timeout()), this, SLOT(onTimer()));
+  connect(timer, &QTimer::timeout, this, &ImageView::onTimer);
   timer->start(33);
 }
 

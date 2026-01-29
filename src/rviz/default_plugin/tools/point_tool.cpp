@@ -28,7 +28,7 @@
  */
 
 #include <OgreRay.h>
-#include <OgreVector3.h>
+#include <rviz/ogre_helpers/ogre_vector.h>
 
 #include <rviz/viewport_mouse_event.h>
 #include <rviz/load_resource.h>
@@ -54,11 +54,11 @@ PointTool::PointTool() : Tool()
 
   topic_property_ =
       new StringProperty("Topic", "/clicked_point", "The topic on which to publish points.",
-                         getPropertyContainer(), SLOT(updateTopic()), this);
+                         getPropertyContainer(), &PointTool::updateTopic, this);
 
   auto_deactivate_property_ =
       new BoolProperty("Single click", true, "Switch away from this tool after one click.",
-                       getPropertyContainer(), SLOT(updateAutoDeactivate()), this);
+                       getPropertyContainer(), &PointTool::updateAutoDeactivate, this);
 
   updateTopic();
 }

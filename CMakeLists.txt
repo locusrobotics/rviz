@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.16)
 project(rviz)
 
 if (POLICY CMP0042)
@@ -82,9 +82,9 @@ else()
 endif()
 
 # TODO: adapt version after upgrade to newer OGRE release
-# Disable deprecation warnings for OGRE >= 1.10
+# Consider deprecation issues as warnings, not as errors for OGRE >= 1.10
 if(NOT OGRE_VERSION VERSION_LESS "1.10.0" AND NOT MSVC)
-  add_compile_options(-Wno-deprecated-declarations)
+  add_compile_options(-Wno-error=deprecated-declarations)
 endif()
 
 if(APPLE)
@@ -97,7 +97,7 @@ if(APPLE)
   add_definitions(-D__ASSERT_MACROS_DEFINE_VERSIONS_WITHOUT_UNDERSCORES=0)
 endif()
 
-# Prefer newer vender-specific OpenGL library
+# Prefer newer vendor-specific OpenGL library
 if (POLICY CMP0072)
   cmake_policy(SET CMP0072 NEW)
 endif()
@@ -105,9 +105,21 @@ find_package(OpenGL REQUIRED)
 
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt5 REQUIRED COMPONENTS Core Widgets OpenGL)
-set(QT_LIBRARIES Qt5::Widgets)
-set(QTVERSION ${Qt5Widgets_VERSION})
+set(RVIZ_QT_VERSIONS "5;6" CACHE STRING "List of Qt versions to consider (in order)")
+foreach(_current_version ${RVIZ_QT_VERSIONS})
+  find_package(Qt${_current_version} QUIET COMPONENTS Core Widgets OpenGL)
+  if (Qt${_current_version}_FOUND)
+    set(QTVERSION ${Qt${_current_version}_VERSION})
+    set(QT_LIBRARIES Qt${_current_version}::Widgets)
+    break() # early break from loop
+  else()
+    message(STATUS "Qt${_current_version} not found.")
+  endif()
+endforeach()
+if(NOT QTVERSION)
+  message(FATAL_ERROR "Failed to find a suitable Qt version.")
+endif()
+message(STATUS "Found Qt ${QTVERSION}")
 add_definitions(-DQT_NO_KEYWORDS)
 
 find_package(catkin REQUIRED
@@ -124,7 +136,6 @@ find_package(catkin REQUIRED
   pluginlib
   python_qt_binding
   resource_retriever
-  rosbag
   rosconsole
   roscpp
   roslib
@@ -137,8 +148,6 @@ find_package(catkin REQUIRED
   urdf
   visualization_msgs
 )
-
-find_package(PythonLibs "${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}" REQUIRED)
 
 find_package(Eigen3 QUIET)
 if(NOT EIGEN3_FOUND)
@@ -219,7 +228,6 @@ include_directories(SYSTEM
   ${EIGEN3_INCLUDE_DIRS}
   ${OGRE_INCLUDE_DIRS}
   ${OPENGL_INCLUDE_DIR}
-  ${PYTHON_INCLUDE_PATH}
   ${TinyXML2_INCLUDE_DIRS}
   ${urdfdom_headers_INCLUDE_DIRS}
   ${ASSIMP_INCLUDE_DIRS}

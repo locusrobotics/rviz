@@ -33,11 +33,10 @@
 
 #include <OgreSceneManager.h>
 #include <OgreSceneNode.h>
-#include <OgreVector3.h>
+#include <rviz/ogre_helpers/ogre_vector.h>
 #include <OgreQuaternion.h>
 #include <OgreManualObject.h>
 #include <OgreMaterialManager.h>
-#include <OgreBillboardSet.h>
 #include <OgreBillboard.h>
 #include <OgreTexture.h>
 #include <OgreTextureManager.h>
@@ -446,29 +445,22 @@ void PointCloud::addPoints(Point* points, uint32_t num_points)
   }
   else
   {
-    if (render_mode_ == RM_POINTS)
+    switch (render_mode_)
     {
+    case RM_POINTS:
       vertices = g_point_vertices;
-    }
-    else if (render_mode_ == RM_SQUARES)
-    {
+      break;
+    case RM_SQUARES:
+    case RM_FLAT_SQUARES:
+    case RM_TILES:
       vertices = g_billboard_vertices;
-    }
-    else if (render_mode_ == RM_FLAT_SQUARES)
-    {
-      vertices = g_billboard_vertices;
-    }
-    else if (render_mode_ == RM_SPHERES)
-    {
+      break;
+    case RM_SPHERES:
       vertices = g_billboard_sphere_vertices;
-    }
-    else if (render_mode_ == RM_TILES)
-    {
-      vertices = g_billboard_vertices;
-    }
-    else if (render_mode_ == RM_BOXES)
-    {
+      break;
+    case RM_BOXES:
       vertices = g_box_vertices;
+      break;
     }
   }
 

@@ -40,8 +40,10 @@
 #include <rviz/properties/property.h>
 #include <rviz/properties/ros_topic_property.h>
 #include <rviz/selection/selection_manager.h>
+#include <rviz/windows_compat.h>
 
 #include <rviz/default_plugin/marker_display.h>
+
 
 namespace rviz
 {
@@ -54,14 +56,14 @@ MarkerDisplay::MarkerDisplay() : Display(), tf_filter_(nullptr)
       QString::fromStdString(ros::message_traits::datatype<visualization_msgs::Marker>()),
       "visualization_msgs::Marker topic to subscribe to.  <topic>_array will also"
       " automatically be subscribed with type visualization_msgs::MarkerArray.",
-      this, SLOT(updateTopic()));
+      this, &MarkerDisplay::updateTopic);
 
   queue_size_property_ =
       new IntProperty("Queue Size", 100,
                       "Advanced: set the size of the incoming Marker message queue.  Increasing this is"
                       " useful if your incoming TF data is delayed significantly from your Marker data, "
                       "but it can greatly increase memory usage if the messages are big.",
-                      this, SLOT(updateQueueSize()));
+                      this, &MarkerDisplay::updateQueueSize);
   queue_size_property_->setMin(0);
 
   namespaces_category_ = new Property("Namespaces", QVariant(), "", this);
@@ -75,8 +77,10 @@ void MarkerDisplay::onInitialize()
                                                              queue_size_property_->getInt(), update_nh_);
 
   tf_filter_->connectInput(sub_);
-  tf_filter_->registerCallback(boost::bind(&MarkerDisplay::incomingMarker, this, _1));
-  tf_filter_->registerFailureCallback(boost::bind(&MarkerDisplay::failedMarker, this, _1, _2));
+  tf_filter_->registerCallback(
+      boost::bind(&MarkerDisplay::incomingMarker, this, boost::placeholders::_1));
+  tf_filter_->registerFailureCallback(
+      boost::bind(&MarkerDisplay::failedMarker, this, boost::placeholders::_1, boost::placeholders::_2));
 
   namespace_config_enabled_state_.clear();
 }
@@ -85,7 +89,7 @@ MarkerDisplay::~MarkerDisplay()
 {
   if (initialized())
   {
-    unsubscribe();
+    MarkerDisplay::unsubscribe();
 
     clearMarkers();
 
@@ -455,7 +459,7 @@ MarkerNamespace::MarkerNamespace(const QString& name, Property* parent_property,
   // Can't do this connect in chained constructor above because at
   // that point it doesn't really know that "this" is a
   // MarkerNamespace*, so the signal doesn't get connected.
-  connect(this, SIGNAL(changed()), this, SLOT(onEnableChanged()));
+  connect(this, &Property::changed, this, &MarkerNamespace::onEnableChanged);
 }
 
 void MarkerNamespace::onEnableChanged()

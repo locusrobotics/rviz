@@ -27,7 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <boost/bind.hpp>
+#include <boost/bind/bind.hpp>
 
 #include <OgreManualObject.h>
 #include <OgreMaterialManager.h>
@@ -219,20 +219,20 @@ void Swatch::updateData()
 }
 
 
-MapDisplay::MapDisplay() : Display(), loaded_(false), resolution_(0.0f), width_(0), height_(0)
+MapDisplay::MapDisplay()
+  : Display(), loaded_(false), map_updated_(false), resolution_(0.0f), width_(0), height_(0)
 {
-  connect(this, SIGNAL(mapUpdated()), this, SLOT(showMap()));
   topic_property_ = new RosTopicProperty(
       "Topic", "", QString::fromStdString(ros::message_traits::datatype<nav_msgs::OccupancyGrid>()),
-      "nav_msgs::OccupancyGrid topic to subscribe to.", this, SLOT(updateTopic()));
+      "nav_msgs::OccupancyGrid topic to subscribe to.", this, &MapDisplay::updateTopic);
 
   alpha_property_ = new FloatProperty("Alpha", 0.7, "Amount of transparency to apply to the map.", this,
-                                      SLOT(updateAlpha()));
+                                      &MapDisplay::updateAlpha);
   alpha_property_->setMin(0);
   alpha_property_->setMax(1);
 
   color_scheme_property_ = new EnumProperty("Color Scheme", "map", "How to color the occupancy values.",
-                                            this, SLOT(updatePalette()));
+                                            this, &MapDisplay::updatePalette);
   // Option values here must correspond to indices in palette_textures_ array in onInitialize() below.
   color_scheme_property_->addOption("map", 0);
   color_scheme_property_->addOption("costmap", 1);
@@ -241,7 +241,7 @@ MapDisplay::MapDisplay() : Display(), loaded_(false), resolution_(0.0f), width_(
   draw_under_property_ = new Property(
       "Draw Behind", false,
       "Rendering option, controls whether or not the map is always drawn behind everything else.", this,
-      SLOT(updateDrawUnder()));
+      &MapDisplay::updateDrawUnder);
 
   resolution_property_ =
       new FloatProperty("Resolution", 0, "Resolution of the map. (not editable)", this);
@@ -263,16 +263,17 @@ MapDisplay::MapDisplay() : Display(), loaded_(false), resolution_(0.0f), width_(
                                                  "Orientation of the map. (not editable)", this);
   orientation_property_->setReadOnly(true);
 
-  unreliable_property_ =
-      new BoolProperty("Unreliable", false, "Prefer UDP topic transport", this, SLOT(updateTopic()));
+  unreliable_property_ = new BoolProperty("Unreliable", false, "Prefer UDP topic transport", this,
+                                          &MapDisplay::updateTopic);
 
-  transform_timestamp_property_ = new BoolProperty(
-      "Use Timestamp", false, "Use map header timestamp when transforming", this, SLOT(transformMap()));
+  transform_timestamp_property_ =
+      new BoolProperty("Use Timestamp", false, "Use map header timestamp when transforming", this,
+                       &MapDisplay::transformMap);
 }
 
 MapDisplay::~MapDisplay()
 {
-  unsubscribe();
+  MapDisplay::unsubscribe();
   clear();
   for (unsigned i = 0; i < swatches.size(); i++)
   {
@@ -544,6 +545,7 @@ void MapDisplay::clear()
   }
 
   loaded_ = false;
+  map_updated_ = false;
 }
 
 bool validateFloats(const nav_msgs::OccupancyGrid& msg)
@@ -557,9 +559,8 @@ bool validateFloats(const nav_msgs::OccupancyGrid& msg)
 void MapDisplay::incomingMap(const nav_msgs::OccupancyGrid::ConstPtr& msg)
 {
   current_map_ = *msg;
-  // updated via signal in case ros spinner is in a different thread
-  Q_EMIT mapUpdated();
   loaded_ = true;
+  map_updated_ = true;
 }
 
 
@@ -585,8 +586,7 @@ void MapDisplay::incomingUpdate(const map_msgs::OccupancyGridUpdate::ConstPtr& u
     memcpy(&current_map_.data[(update->y + y) * current_map_.info.width + update->x],
            &update->data[y * update->width], update->width);
   }
-  // updated via signal in case ros spinner is in a different thread
-  Q_EMIT mapUpdated();
+  map_updated_ = true;
 }
 
 void MapDisplay::createSwatches()
@@ -649,7 +649,7 @@ void MapDisplay::createSwatches()
   }
 }
 
-void MapDisplay::showMap()
+void MapDisplay::updateMap()
 {
   if (current_map_.data.empty())
   {
@@ -754,9 +754,7 @@ void MapDisplay::showMap()
   position_property_->setVector(position);
   orientation_property_->setQuaternion(orientation);
 
-  transformMap();
-
-  context_->queueRender();
+  map_updated_ = false;
 }
 
 void MapDisplay::updatePalette()
@@ -839,6 +837,8 @@ void MapDisplay::setTopic(const QString& topic, const QString& /*datatype*/)
 
 void MapDisplay::update(float /*wall_dt*/, float /*ros_dt*/)
 {
+  if (map_updated_)
+    updateMap();
   transformMap();
 }
 

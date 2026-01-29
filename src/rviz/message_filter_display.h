@@ -55,15 +55,15 @@ class RVIZ_EXPORT _RosTopicDisplay : public Display
 public:
   _RosTopicDisplay()
   {
-    topic_property_ = new RosTopicProperty("Topic", "", "", "", this, SLOT(updateTopic()));
-    unreliable_property_ =
-        new BoolProperty("Unreliable", false, "Prefer UDP topic transport", this, SLOT(updateTopic()));
+    topic_property_ = new RosTopicProperty("Topic", "", "", "", this, &_RosTopicDisplay::updateTopic);
+    unreliable_property_ = new BoolProperty("Unreliable", false, "Prefer UDP topic transport", this,
+                                            &_RosTopicDisplay::updateTopic);
     queue_size_property_ =
         new IntProperty("Queue Size", 10,
                         "Size of TF message filter queue.\n"
                         "Increasing this is useful if your TF data is delayed significantly "
                         "w.r.t. your data, but it can greatly increase memory usage as well.",
-                        this, SLOT(updateQueueSize()));
+                        this, &_RosTopicDisplay::updateQueueSize);
     queue_size_property_->setMin(0);
     qRegisterMetaType<boost::shared_ptr<const void>>(); // required to send via queued connection
   }
@@ -111,7 +111,7 @@ public:
 
     tf_filter_->connectInput(sub_);
     tf_filter_->registerCallback(
-        boost::bind(&MessageFilterDisplay<MessageType>::incomingMessage, this, _1));
+        boost::bind(&MessageFilterDisplay<MessageType>::incomingMessage, this, boost::placeholders::_1));
     context_->getFrameManager()->registerFilterForTransformStatusCheck(tf_filter_, this);
   }
 
@@ -126,9 +126,6 @@ public:
   {
     Display::reset();
     tf_filter_->clear();
-    // Quick fix for #1372. Can be removed if https://github.com/ros/geometry2/pull/402 is released
-    if (tf_filter_)
-      update_nh_.getCallbackQueue()->removeByID((uint64_t)tf_filter_);
     messages_received_ = 0;
   }
 
@@ -216,6 +213,9 @@ protected:
 
   void processTypeErasedMessage(boost::shared_ptr<const void> type_erased_msg) override
   {
+    if (!isEnabled())
+      return;
+
     auto msg = boost::static_pointer_cast<const MessageType>(type_erased_msg);
     ++messages_received_;
     setStatus(StatusProperty::Ok, "Topic", QString::number(messages_received_) + " messages received");

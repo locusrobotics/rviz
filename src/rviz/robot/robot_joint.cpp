@@ -53,13 +53,14 @@ RobotJoint::RobotJoint(Robot* robot, const urdf::JointConstSharedPtr& joint)
   , axes_(nullptr)
   , axis_(nullptr)
 {
-  joint_property_ = new Property(name_.c_str(), true, "", nullptr, SLOT(updateChildVisibility()), this);
+  joint_property_ =
+      new Property(name_.c_str(), true, "", nullptr, &RobotJoint::updateChildVisibility, this);
   joint_property_->setIcon(rviz::loadPixmap("package://rviz/icons/classes/RobotJoint.png"));
 
   details_ = new Property("Details", QVariant(), "", nullptr);
 
   axes_property_ = new Property("Show Axes", false, "Enable/disable showing the axes of this joint.",
-                                joint_property_, SLOT(updateAxes()), this);
+                                joint_property_, &RobotJoint::updateAxes, this);
 
   position_property_ =
       new VectorProperty("Position", Ogre::Vector3::ZERO,
@@ -112,7 +113,7 @@ RobotJoint::RobotJoint(Robot* robot, const urdf::JointConstSharedPtr& joint)
   {
     show_axis_property_ =
         new Property("Show Joint Axis", false, "Enable/disable showing the axis of this joint.",
-                     joint_property_, SLOT(updateAxis()), this);
+                     joint_property_, &RobotJoint::updateAxis, this);
 
     axis_property_ =
         new VectorProperty("Joint Axis", Ogre::Vector3(joint->axis.x, joint->axis.y, joint->axis.z),
@@ -210,7 +211,8 @@ void RobotJoint::calculateJointCheckboxesRecursive(int& links_with_geom,
   links_with_geom_unchecked = 0;
 
   RobotLink* link = robot_->getLink(child_link_name_);
-  if (link && link->hasGeometry())
+  assert(link);
+  if (link->hasGeometry())
   {
     bool checked = link->getLinkProperty()->getValue().toBool();
     links_with_geom_checked += checked ? 1 : 0;
@@ -230,11 +232,9 @@ void RobotJoint::calculateJointCheckboxesRecursive(int& links_with_geom,
     }
   }
 
-  std::vector<std::string>::const_iterator child_joint_it = link->getChildJointNames().begin();
-  std::vector<std::string>::const_iterator child_joint_end = link->getChildJointNames().end();
-  for (; child_joint_it != child_joint_end; ++child_joint_it)
+  for (const std::string& child_joint_name : link->getChildJointNames())
   {
-    RobotJoint* child_joint = robot_->getJoint(*child_joint_it);
+    RobotJoint* child_joint = robot_->getJoint(child_joint_name);
     if (child_joint)
     {
       int child_links_with_geom;
@@ -271,7 +271,8 @@ void RobotJoint::getChildLinkState(int& links_with_geom,
   links_with_geom_unchecked = 0;
 
   RobotLink* link = robot_->getLink(child_link_name_);
-  if (link && link->hasGeometry())
+  assert(link);
+  if (link->hasGeometry())
   {
     bool checked = link->getLinkProperty()->getValue().toBool();
     links_with_geom_checked += checked ? 1 : 0;
@@ -387,10 +388,9 @@ void RobotJoint::updateAxis()
       axis_->getSceneNode()->setVisible(getEnabled());
 
       axis_->setPosition(position_property_->getVector());
-      axis_->setOrientation(orientation_property_->getQuaternion());
+      axis_->setDirection(orientation_property_->getQuaternion() * axis_property_->getVector());
 
-      // TODO(lucasw) store an Ogre::ColorValue and set it according to
-      // joint type.
+      // TODO(lucasw) store an Ogre::ColorValue and set it according to joint type.
       axis_->setColor(0.0, 0.8, 0.0, 1.0);
     }
   }
@@ -421,8 +421,7 @@ void RobotJoint::setTransforms(const Ogre::Vector3& parent_link_position,
   if (axis_)
   {
     axis_->setPosition(position);
-    axis_->setOrientation(orientation);
-    axis_->setDirection(parent_link_orientation * axis_property_->getVector());
+    axis_->setDirection(orientation * axis_property_->getVector());
   }
 }
 

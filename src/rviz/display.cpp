@@ -60,7 +60,7 @@ Display::Display()
   , visibility_bits_(0xFFFFFFFF)
   , associated_widget_(nullptr)
   , associated_widget_panel_(nullptr)
-  , associated_widget_visible_(false)
+  , suppress_hiding_associated_widget_panel_(false)
 {
   // Needed for timeSignal (see header) to work across threads
   qRegisterMetaType<ros::Time>();
@@ -68,7 +68,7 @@ Display::Display()
   // Make the display-enable checkbox show up, and make it unchecked by default.
   setValue(false);
 
-  connect(this, SIGNAL(changed()), this, SLOT(onEnableChanged()));
+  connect(this, &Property::changed, this, &Display::onEnableChanged);
 
   setDisableChildrenIfFalse(true);
 }
@@ -284,7 +284,7 @@ void Display::setFixedFrame(const QString& fixed_frame)
 
 void Display::emitTimeSignal(ros::Time time)
 {
-  Q_EMIT(timeSignal(this, time));
+  Q_EMIT(timeSignal(time, QPrivateSignal()));
 }
 
 void Display::reset()
@@ -311,10 +311,7 @@ void Display::onEnableChanged()
     scene_node_->setVisible(true);
 
     if (associated_widget_panel_)
-    {
-      if (!associated_widget_visible_)
-        associated_widget_panel_->show();
-    }
+      associated_widget_panel_->show();
     else if (associated_widget_)
       associated_widget_->show();
 
@@ -327,7 +324,7 @@ void Display::onEnableChanged()
 
     if (associated_widget_panel_)
     {
-      if (associated_widget_visible_)
+      if (!suppress_hiding_associated_widget_panel_)
         associated_widget_panel_->hide();
     }
     else if (associated_widget_)
@@ -354,9 +351,9 @@ void Display::setAssociatedWidget(QWidget* widget)
 {
   if (associated_widget_panel_)
   {
-    disconnect(associated_widget_panel_, SIGNAL(visibilityChanged(bool)), this,
-               SLOT(associatedPanelVisibilityChange(bool)));
-    disconnect(associated_widget_panel_, SIGNAL(closed()), this, SLOT(disable()));
+    disconnect(associated_widget_panel_, &PanelDockWidget::visibilityChanged, this,
+               &Display::associatedPanelVisibilityChange);
+    disconnect(associated_widget_panel_, &PanelDockWidget::closed, this, &Display::disable);
   }
 
   associated_widget_ = widget;
@@ -366,10 +363,9 @@ void Display::setAssociatedWidget(QWidget* widget)
     if (wm)
     {
       associated_widget_panel_ = wm->addPane(getName(), associated_widget_);
-      associated_widget_visible_ = true;
-      connect(associated_widget_panel_, SIGNAL(visibilityChanged(bool)), this,
-              SLOT(associatedPanelVisibilityChange(bool)));
-      connect(associated_widget_panel_, SIGNAL(closed()), this, SLOT(disable()));
+      connect(associated_widget_panel_, &PanelDockWidget::visibilityChanged, this,
+              &Display::associatedPanelVisibilityChange);
+      connect(associated_widget_panel_, &PanelDockWidget::closed, this, &Display::disable);
       associated_widget_panel_->setIcon(getIcon());
     }
     else
@@ -386,9 +382,10 @@ void Display::setAssociatedWidget(QWidget* widget)
 
 void Display::associatedPanelVisibilityChange(bool visible)
 {
-  associated_widget_visible_ = visible;
   // If something external makes the panel visible/invisible, make sure to enable/disable the display
+  suppress_hiding_associated_widget_panel_ = true;
   setEnabled(visible);
+  suppress_hiding_associated_widget_panel_ = false;
   // Remark: vice versa, in Display::onEnableChanged(),
   //         the panel is made visible/invisible when the display is enabled/disabled
 }
@@ -409,8 +406,8 @@ void Display::setName(const QString& name)
   if (associated_widget_panel_)
   {
     associated_widget_panel_->setWindowTitle(name);
-    associated_widget_panel_->setObjectName(
-        name); // QMainWindow::saveState() needs objectName to be set.
+    // QMainWindow::saveState() needs objectName to be set.
+    associated_widget_panel_->setObjectName(name);
   }
   else if (associated_widget_)
   {

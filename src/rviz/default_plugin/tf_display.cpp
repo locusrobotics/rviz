@@ -27,10 +27,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <boost/bind.hpp>
+#include <boost/bind/bind.hpp>
+#include <regex>
 
 #include <OgreSceneNode.h>
 #include <OgreSceneManager.h>
+#include <QValidator>
+#include <QLineEdit>
+#include <QToolTip>
 
 #include <rviz/display_context.h>
 #include <rviz/frame_manager.h>
@@ -92,7 +96,7 @@ void FrameSelectionHandler::createProperties(const Picked& /*obj*/, Property* pa
       new Property("Frame " + QString::fromStdString(frame_->name_), QVariant(), "", parent_property);
 
   enabled_property_ = new BoolProperty("Enabled", true, "", category_property_,
-                                       SLOT(updateVisibilityFromSelection()), frame_);
+                                       &FrameInfo::updateVisibilityFromSelection, frame_);
 
   parent_property_ = new StringProperty("Parent", "", "", category_property_);
   parent_property_->setReadOnly(true);
@@ -156,21 +160,90 @@ void FrameSelectionHandler::setOrientation(const Ogre::Quaternion& orientation)
   }
 }
 
+class RegexValidator : public QValidator
+{
+  QLineEdit* editor_;
+
+public:
+  RegexValidator(QLineEdit* editor) : QValidator(editor), editor_(editor)
+  {
+  }
+  QValidator::State validate(QString& input, int& /*pos*/) const override
+  {
+    try
+    {
+      std::regex(input.toLocal8Bit().constData());
+      editor_->setStyleSheet(QString());
+      QToolTip::hideText();
+      return QValidator::Acceptable;
+    }
+    catch (const std::regex_error& e)
+    {
+      editor_->setStyleSheet("background: #ffe4e4");
+      QToolTip::showText(editor_->mapToGlobal(QPoint(0, 5)), tr(e.what()), editor_, QRect(), 5000);
+      return QValidator::Intermediate;
+    }
+  }
+};
+
+class RegexFilterProperty : public StringProperty
+{
+  std::regex default_;
+  std::regex regex_;
+
+  void onValueChanged()
+  {
+    const auto& value = getString();
+    if (value.isEmpty())
+      regex_ = default_;
+    else
+    {
+      try
+      {
+        regex_.assign(value.toLocal8Bit().constData(), std::regex_constants::optimize);
+      }
+      catch (const std::regex_error& e)
+      {
+        regex_ = default_;
+      }
+    }
+  }
+
+public:
+  RegexFilterProperty(const QString& name, const std::regex& regex, Property* parent)
+    : StringProperty(name, "", "regular expression", parent), default_(regex), regex_(regex)
+  {
+    QObject::connect(this, &RegexFilterProperty::changed, this, [this]() { onValueChanged(); });
+  }
+  const std::regex& regex() const
+  {
+    return regex_;
+  }
+
+  QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option) override
+  {
+    auto* editor = qobject_cast<QLineEdit*>(StringProperty::createEditor(parent, option));
+    if (editor)
+      editor->setValidator(new RegexValidator(editor));
+    return editor;
+  }
+};
+
 typedef std::set<FrameInfo*> S_FrameInfo;
 
 TFDisplay::TFDisplay() : Display(), update_timer_(0.0f), changing_single_frame_enabled_state_(false)
 {
   show_names_property_ =
       new BoolProperty("Show Names", true, "Whether or not names should be shown next to the frames.",
-                       this, SLOT(updateShowNames()));
+                       this, &TFDisplay::updateShowNames);
 
   show_axes_property_ =
       new BoolProperty("Show Axes", true, "Whether or not the axes of each frame should be shown.", this,
-                       SLOT(updateShowAxes()));
+                       &TFDisplay::updateShowAxes);
 
   show_arrows_property_ = new BoolProperty("Show Arrows", true,
                                            "Whether or not arrows from child to parent should be shown.",
-                                           this, SLOT(updateShowArrows()));
+                                           this, &TFDisplay::updateShowArrows);
 
   scale_property_ =
       new FloatProperty("Marker Scale", 1, "Scaling factor for all names, axes and arrows.", this);
@@ -193,11 +266,14 @@ TFDisplay::TFDisplay() : Display(), update_timer_(0.0f), changing_single_frame_e
       this);
   frame_timeout_property_->setMin(1);
 
+  filter_whitelist_property_ = new RegexFilterProperty("Filter (whitelist)", std::regex(""), this);
+  filter_blacklist_property_ = new RegexFilterProperty("Filter (blacklist)", std::regex(), this);
+
   frames_category_ = new Property("Frames", QVariant(), "The list of all frames.", this);
 
   all_enabled_property_ =
       new BoolProperty("All Enabled", true, "Whether all the frames should be enabled or not.",
-                       frames_category_, SLOT(allEnabledChanged()), this);
+                       frames_category_, &TFDisplay::allEnabledChanged, this);
 
   tree_category_ = new Property(
       "Tree", QVariant(), "A tree-view of the frames, showing the parent/child relationships.", this);
@@ -365,46 +441,40 @@ void TFDisplay::updateFrames()
   typedef std::vector<std::string> V_string;
   V_string frames;
   context_->getTF2BufferPtr()->_getFrameStrings(frames);
-  std::sort(frames.begin(), frames.end());
 
-  S_FrameInfo current_frames;
-
+  // filter frames according to white- and black-list regular expressions
+  auto it = frames.begin(), end = frames.end();
+  while (it != end)
   {
-    V_string::iterator it = frames.begin();
-    V_string::iterator end = frames.end();
-    for (; it != end; ++it)
-    {
-      const std::string& frame = *it;
-
-      if (frame.empty())
-      {
-        continue;
-      }
-
-      FrameInfo* info = getFrameInfo(frame);
-      if (!info)
-      {
-        info = createFrame(frame);
-      }
-      else
-      {
-        updateFrame(info);
-      }
-
-      current_frames.insert(info);
-    }
+    if (it->empty() || !std::regex_search(*it, filter_whitelist_property_->regex()) ||
+        std::regex_search(*it, filter_blacklist_property_->regex()))
+      std::swap(*it, *--end); // swap current to-be-dropped name with last one
+    else
+      ++it;
   }
 
+  S_FrameInfo current_frames;
+  for (it = frames.begin(); it != end; ++it)
   {
-    M_FrameInfo::iterator frame_it = frames_.begin();
-    M_FrameInfo::iterator frame_end = frames_.end();
-    while (frame_it != frame_end)
+    FrameInfo* info = getFrameInfo(*it);
+    if (!info)
     {
-      if (current_frames.find(frame_it->second) == current_frames.end())
-        frame_it = deleteFrame(frame_it, true);
-      else
-        ++frame_it;
+      info = createFrame(*it);
     }
+    else
+    {
+      updateFrame(info);
+    }
+
+    current_frames.insert(info);
+  }
+
+  for (auto frame_it = frames_.begin(), frame_end = frames_.end(); frame_it != frame_end;)
+  {
+    if (current_frames.find(frame_it->second) == current_frames.end())
+      frame_it = deleteFrame(frame_it, true);
+    else
+      ++frame_it;
   }
 
   context_->queueRender();
@@ -437,8 +507,9 @@ FrameInfo* TFDisplay::createFrame(const std::string& frame)
   info->parent_arrow_->setShaftColor(ARROW_SHAFT_COLOR);
 
   info->enabled_property_ = new BoolProperty(QString::fromStdString(info->name_), true,
-                                             "Enable or disable this individual frame.",
-                                             frames_category_, SLOT(updateVisibilityFromFrame()), info);
+                                             "Enable or disable this individual frame.", nullptr,
+                                             &FrameInfo::updateVisibilityFromFrame, info);
+  frames_category_->insertChildSorted(info->enabled_property_);
 
   info->parent_property_ =
       new StringProperty("Parent", "", "Parent of this frame.  (Not editable)", info->enabled_property_);
@@ -483,6 +554,17 @@ FrameInfo* TFDisplay::createFrame(const std::string& frame)
 Ogre::ColourValue lerpColor(const Ogre::ColourValue& start, const Ogre::ColourValue& end, float t)
 {
   return start * t + end * (1 - t);
+}
+
+bool hasLoop(rviz::Property* child, rviz::Property* parent, rviz::Property* root)
+{
+  while (child != root)
+  {
+    if (child == parent)
+      return true;
+    child = child->getParent();
+  }
+  return false;
 }
 
 void TFDisplay::updateFrame(FrameInfo* frame)
@@ -548,6 +630,9 @@ void TFDisplay::updateFrame(FrameInfo* frame)
 
   setStatusStd(StatusProperty::Ok, frame->name_, "Transform OK");
 
+  float scale = scale_property_->getFloat();
+  bool frame_enabled = frame->enabled_property_->getBool();
+
   Ogre::Vector3 position;
   Ogre::Quaternion orientation;
   if (!context_->getFrameManager()->getTransform(frame->name_, ros::Time(), position, orientation))
@@ -560,62 +645,31 @@ void TFDisplay::updateFrame(FrameInfo* frame)
     frame->name_node_->setVisible(false);
     frame->axes_->getSceneNode()->setVisible(false);
     frame->parent_arrow_->getSceneNode()->setVisible(false);
-    return;
   }
+  else
+  {
+    frame->selection_handler_->setPosition(position);
+    frame->selection_handler_->setOrientation(orientation);
 
-  frame->selection_handler_->setPosition(position);
-  frame->selection_handler_->setOrientation(orientation);
+    frame->axes_->setPosition(position);
+    frame->axes_->setOrientation(orientation);
+    frame->axes_->getSceneNode()->setVisible(show_axes_property_->getBool() && frame_enabled);
+    frame->axes_->setScale(Ogre::Vector3(scale, scale, scale));
+    frame->axes_->updateAlpha(alpha_property_->getFloat());
 
-  bool frame_enabled = frame->enabled_property_->getBool();
+    frame->name_node_->setPosition(position);
+    frame->name_node_->setVisible(show_names_property_->getBool() && frame_enabled);
+    frame->name_node_->setScale(scale, scale, scale);
 
-  frame->axes_->setPosition(position);
-  frame->axes_->setOrientation(orientation);
-  frame->axes_->getSceneNode()->setVisible(show_axes_property_->getBool() && frame_enabled);
-  float scale = scale_property_->getFloat();
-  frame->axes_->setScale(Ogre::Vector3(scale, scale, scale));
-  float alpha = alpha_property_->getFloat();
-  frame->axes_->updateAlpha(alpha);
-
-  frame->name_node_->setPosition(position);
-  frame->name_node_->setVisible(show_names_property_->getBool() && frame_enabled);
-  frame->name_node_->setScale(scale, scale, scale);
-
-  frame->position_property_->setVector(position);
-  frame->orientation_property_->setQuaternion(orientation);
+    frame->position_property_->setVector(position);
+    frame->orientation_property_->setQuaternion(orientation);
+  }
 
   std::string old_parent = frame->parent_;
   frame->parent_.clear();
   bool has_parent = tf->_getParent(frame->name_, ros::Time(), frame->parent_);
   if (has_parent)
   {
-    // If this frame has no tree property or the parent has changed,
-    if (!frame->tree_property_ || old_parent != frame->parent_)
-    {
-      // Look up the new parent.
-      M_FrameInfo::iterator parent_it = frames_.find(frame->parent_);
-      if (parent_it != frames_.end())
-      {
-        FrameInfo* parent = parent_it->second;
-
-        // If the parent has a tree property, make a new tree property for this frame.
-        if (parent->tree_property_)
-        {
-          if (!frame->tree_property_)
-          {
-            frame->tree_property_ = new Property(QString::fromStdString(frame->name_), QVariant(), "",
-                                                 parent->tree_property_);
-          }
-          else
-          {
-            frame->tree_property_->setParent(parent->tree_property_);
-            frame->tree_property_->setName(QString::fromStdString(frame->name_));
-            frame->tree_property_->setValue(QVariant());
-            frame->tree_property_->setDescription("");
-          }
-        }
-      }
-    }
-
     geometry_msgs::TransformStamped transform;
     try
     {
@@ -680,23 +734,37 @@ void TFDisplay::updateFrame(FrameInfo* frame)
   }
   else
   {
-    if (!frame->tree_property_ || old_parent != frame->parent_)
-    {
-      if (!frame->tree_property_)
-      {
-        frame->tree_property_ =
-            new Property(QString::fromStdString(frame->name_), QVariant(), "", tree_category_);
-      }
-      else
-      {
-        frame->tree_property_->setName(QString::fromStdString(frame->name_));
-        frame->tree_property_->setValue(QVariant());
-        frame->tree_property_->setDescription("");
-        frame->tree_property_->setParent(tree_category_);
-      }
-    }
-
     frame->parent_arrow_->getSceneNode()->setVisible(false);
+  }
+
+  // If this frame has no tree property yet or the parent has changed,
+  if (!frame->tree_property_ || old_parent != frame->parent_ ||
+      // or its actual parent was not yet created
+      (has_parent && frame->tree_property_->getParent() == tree_category_))
+  {
+    // Look up the new parent.
+    FrameInfo* parent = has_parent ? getFrameInfo(frame->parent_) : nullptr;
+    // Retrieve tree property to add the new child at
+    rviz::Property* parent_tree_property;
+    if (parent && parent->tree_property_) // parent already created
+    {
+      parent_tree_property = parent->tree_property_;
+      if (hasLoop(parent_tree_property, frame->tree_property_, tree_category_))
+        parent_tree_property = tree_category_; // insert loops at root node
+    }
+    else // create (temporarily) at root
+      parent_tree_property = tree_category_;
+
+    if (!frame->tree_property_)
+    { // create new tree node
+      frame->tree_property_ = new Property(QString::fromStdString(frame->name_));
+      parent_tree_property->insertChildSorted(frame->tree_property_);
+    }
+    else if (frame->tree_property_->getParent() != parent_tree_property)
+    { // re-parent existing tree property
+      frame->tree_property_->getParent()->takeChild(frame->tree_property_);
+      parent_tree_property->insertChildSorted(frame->tree_property_);
+    }
   }
 
   frame->parent_property_->setStdString(frame->parent_);
@@ -716,6 +784,12 @@ TFDisplay::M_FrameInfo::iterator TFDisplay::deleteFrame(M_FrameInfo::iterator it
   if (delete_properties)
   {
     delete frame->enabled_property_;
+    // re-parent all children to root tree node
+    for (int i = frame->tree_property_->numChildren() - 1; i >= 0; --i)
+    {
+      auto* child = frame->tree_property_->takeChild(frame->tree_property_->childAtUnchecked(i));
+      tree_category_->insertChildSorted(child);
+    }
     delete frame->tree_property_;
   }
   delete frame;
