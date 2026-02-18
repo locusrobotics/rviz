@@ -27,7 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <boost/bind.hpp>
+#include <boost/bind/bind.hpp>
 
 #include <OgreManualObject.h>
 #include <OgreMaterialManager.h>
@@ -51,6 +51,7 @@
 #include <rviz/properties/float_property.h>
 #include <rviz/properties/int_property.h>
 #include <rviz/properties/ros_topic_property.h>
+#include <rviz/panel_dock_widget.h>
 #include <rviz/render_panel.h>
 #include <rviz/uniform_string_stream.h>
 #include <rviz/validate_floats.h>
@@ -84,7 +85,7 @@ CameraDisplay::CameraDisplay()
   image_position_property_ =
       new EnumProperty("Image Rendering", BOTH,
                        "Render the image behind all other geometry or overlay it on top, or both.", this,
-                       SLOT(forceRender()));
+                       &CameraDisplay::forceRender);
   image_position_property_->addOption(BACKGROUND);
   image_position_property_->addOption(OVERLAY);
   image_position_property_->addOption(BOTH);
@@ -92,14 +93,14 @@ CameraDisplay::CameraDisplay()
   alpha_property_ = new FloatProperty(
       "Overlay Alpha", 0.5,
       "The amount of transparency to apply to the camera image when rendered as overlay.", this,
-      SLOT(updateAlpha()));
+      &CameraDisplay::updateAlpha);
   alpha_property_->setMin(0);
   alpha_property_->setMax(1);
 
   zoom_property_ = new FloatProperty(
       "Zoom Factor", 1.0,
       "Set a zoom factor below 1 to see a larger part of the world, above 1 to magnify the image.", this,
-      SLOT(forceRender()));
+      &CameraDisplay::forceRender);
   zoom_property_->setMin(0.00001);
   zoom_property_->setMax(100000);
 }
@@ -110,7 +111,7 @@ CameraDisplay::~CameraDisplay()
   {
     render_panel_->getRenderWindow()->removeListener(this);
 
-    unsubscribe();
+    CameraDisplay::unsubscribe();
 
     delete render_panel_;
     delete bg_screen_rect_;
@@ -151,6 +152,7 @@ void CameraDisplay::onInitialize()
     Ogre::TextureUnitState* tu = bg_material_->getTechnique(0)->getPass(0)->createTextureUnitState();
     tu->setTextureName(texture_.getTexture()->getName());
     tu->setTextureFiltering(Ogre::TFO_NONE);
+    tu->setTextureAddressingMode(Ogre::TextureUnitState::TAM_CLAMP);
     tu->setAlphaOperation(Ogre::LBX_SOURCE1, Ogre::LBS_MANUAL, Ogre::LBS_CURRENT, 0.0);
 
     bg_material_->setCullingMode(Ogre::CULL_NONE);
@@ -191,6 +193,8 @@ void CameraDisplay::onInitialize()
   render_panel_->initialize(context_->getSceneManager(), context_);
 
   setAssociatedWidget(render_panel_);
+  if (auto* dock = getAssociatedWidgetPanel())
+    dock->addMaximizeButton();
 
   render_panel_->setAutoRender(false);
   render_panel_->setOverlaysEnabled(false);

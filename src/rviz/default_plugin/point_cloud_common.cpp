@@ -307,7 +307,6 @@ void PointCloudCommon::CloudInfo::clear()
 
 PointCloudCommon::PointCloudCommon(Display* display)
   : auto_size_(false)
-  , spinner_(1, &cbqueue_)
   , new_xyz_transformer_(false)
   , new_color_transformer_(false)
   , needs_retransform_(false)
@@ -317,11 +316,11 @@ PointCloudCommon::PointCloudCommon(Display* display)
   selectable_property_ =
       new BoolProperty("Selectable", true,
                        "Whether or not the points in this point cloud are selectable.", display_,
-                       SLOT(updateSelectable()), this);
+                       &PointCloudCommon::updateSelectable, this);
 
   style_property_ = new EnumProperty("Style", "Flat Squares",
                                      "Rendering mode to use, in order of computational complexity.",
-                                     display_, SLOT(updateStyle()), this);
+                                     display_, &PointCloudCommon::updateStyle, this);
   style_property_->addOption("Points", PointCloud::RM_POINTS);
   style_property_->addOption("Squares", PointCloud::RM_SQUARES);
   style_property_->addOption("Flat Squares", PointCloud::RM_FLAT_SQUARES);
@@ -329,39 +328,39 @@ PointCloudCommon::PointCloudCommon(Display* display)
   style_property_->addOption("Boxes", PointCloud::RM_BOXES);
 
   point_world_size_property_ = new FloatProperty("Size (m)", 0.01, "Point size in meters.", display_,
-                                                 SLOT(updateBillboardSize()), this);
+                                                 &PointCloudCommon::updateBillboardSize, this);
   point_world_size_property_->setMin(0.0001);
 
   point_pixel_size_property_ = new FloatProperty("Size (Pixels)", 3, "Point size in pixels.", display_,
-                                                 SLOT(updateBillboardSize()), this);
+                                                 &PointCloudCommon::updateBillboardSize, this);
   point_pixel_size_property_->setMin(1);
 
   alpha_property_ = new FloatProperty("Alpha", 1.0,
                                       "Amount of transparency to apply to the points. "
                                       "Note that this is experimental and does not always look correct.",
-                                      display_, SLOT(updateAlpha()), this);
+                                      display_, &PointCloudCommon::updateAlpha, this);
   alpha_property_->setMin(0);
   alpha_property_->setMax(1);
 
   decay_time_property_ = new FloatProperty(
       "Decay Time", 0,
       "Duration, in seconds, to keep the incoming points.  0 means only show the latest points.",
-      display_, SLOT(queueRender()));
+      display_, &Display::queueRender);
   decay_time_property_->setMin(0);
 
   xyz_transformer_property_ =
       new EnumProperty("Position Transformer", "",
                        "Set the transformer to use to set the position of the points.", display_,
-                       SLOT(updateXyzTransformer()), this);
-  connect(xyz_transformer_property_, SIGNAL(requestOptions(EnumProperty*)), this,
-          SLOT(setXyzTransformerOptions(EnumProperty*)));
+                       &PointCloudCommon::updateXyzTransformer, this);
+  connect(xyz_transformer_property_, &EnumProperty::requestOptions, this,
+          &PointCloudCommon::setXyzTransformerOptions);
 
   color_transformer_property_ =
       new EnumProperty("Color Transformer", "",
                        "Set the transformer to use to set the color of the points.", display_,
-                       SLOT(updateColorTransformer()), this);
-  connect(color_transformer_property_, SIGNAL(requestOptions(EnumProperty*)), this,
-          SLOT(setColorTransformerOptions(EnumProperty*)));
+                       &PointCloudCommon::updateColorTransformer, this);
+  connect(color_transformer_property_, &EnumProperty::requestOptions, this,
+          &PointCloudCommon::setColorTransformerOptions);
 }
 
 void PointCloudCommon::initialize(DisplayContext* context, Ogre::SceneNode* scene_node)
@@ -377,18 +376,14 @@ void PointCloudCommon::initialize(DisplayContext* context, Ogre::SceneNode* scen
   updateBillboardSize();
   updateAlpha();
   updateSelectable();
-
-  spinner_.start();
 }
 
 PointCloudCommon::~PointCloudCommon()
 {
-  spinner_.stop();
-
-  if (transformer_class_loader_)
-  {
-    delete transformer_class_loader_;
-  }
+  // Ensure any threads holding the mutexes have finished
+  boost::recursive_mutex::scoped_lock lock1(transformers_mutex_);
+  boost::mutex::scoped_lock lock2(new_clouds_mutex_);
+  delete transformer_class_loader_;
 }
 
 void PointCloudCommon::loadTransformers()
@@ -409,7 +404,8 @@ void PointCloudCommon::loadTransformers()
 
     PointCloudTransformerPtr trans(transformer_class_loader_->createUnmanagedInstance(lookup_name));
     trans->init();
-    connect(trans.get(), SIGNAL(needRetransform()), this, SLOT(causeRetransform()));
+    connect(trans.get(), &PointCloudTransformer::needRetransform, this,
+            &PointCloudCommon::causeRetransform);
 
     TransformerInfo info;
     info.transformer = trans;

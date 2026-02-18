@@ -34,6 +34,7 @@
 #include <QPalette>
 #include <QLineEdit>
 #include <QSpinBox>
+#include <QTimer>
 
 #include <rviz/properties/float_edit.h>
 #include <rviz/properties/property_tree_model.h>
@@ -58,9 +59,7 @@ Property* Property::failprop_ = new FailureProperty;
 Property::Property(const QString& name,
                    const QVariant& default_value,
                    const QString& description,
-                   Property* parent,
-                   const char* changed_slot,
-                   QObject* receiver)
+                   Property* parent)
   : value_(default_value)
   , model_(nullptr)
   , child_indexes_valid_(false)
@@ -70,19 +69,20 @@ Property::Property(const QString& name,
   , is_read_only_(false)
   , save_(true)
 {
-  setName(name);
+  Property::setName(name);
   if (parent)
-  {
     parent->addChild(this);
-  }
-  if (receiver == nullptr)
-  {
-    receiver = parent;
-  }
-  if (receiver && changed_slot)
-  {
-    connect(this, SIGNAL(changed()), receiver, changed_slot);
-  }
+}
+
+QMetaObject::Connection
+Property::connect(const QObject* receiver, const char* slot, Qt::ConnectionType type)
+{
+  if (!receiver)
+    receiver = parent_;
+  if (receiver && slot)
+    return QObject::connect(this, SIGNAL(changed()), receiver, slot, type);
+  else
+    return QMetaObject::Connection();
 }
 
 Property::~Property()
@@ -240,7 +240,7 @@ void Property::setParent(Property* new_parent)
 
 QVariant Property::getViewData(int column, int role) const
 {
-  if (role == Qt::TextColorRole && parent_ && parent_->getDisableChildren())
+  if (role == Qt::ForegroundRole && parent_ && parent_->getDisableChildren())
     return QApplication::palette().brush(QPalette::Disabled, QPalette::Text);
 
   switch (column)
@@ -249,6 +249,7 @@ QVariant Property::getViewData(int column, int role) const
     switch (role)
     {
     case Qt::DisplayRole:
+    case Qt::EditRole:
       return getName();
     case Qt::DecorationRole:
       return icon_;
@@ -381,12 +382,22 @@ void Property::addChild(Property* child, int index)
   Q_EMIT childListChanged(this);
 }
 
+void Property::insertChildSorted(Property* child)
+{
+  auto it = std::lower_bound(children_.cbegin(), children_.cend(), child,
+                             [](Property* element, Property* child) {
+                               return element->getName() < child->getName();
+                             });
+  addChild(child, it - children_.cbegin());
+}
+
 void Property::setModel(PropertyTreeModel* model)
 {
   model_ = model;
   if (model_ && hidden_)
   {
-    model_->emitPropertyHiddenChanged(this);
+    // process propertyHiddenChanged after insertion into model has finished
+    QTimer::singleShot(0, this, [this]() { model_->emitPropertyHiddenChanged(this); });
   }
   int num_children = numChildren();
   for (int i = 0; i < num_children; i++)

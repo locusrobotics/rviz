@@ -28,6 +28,7 @@
  */
 
 #include <QApplication>
+#include <QProcessEnvironment> // check env variables
 #include <QTimer>
 
 #include <boost/program_options.hpp>
@@ -54,6 +55,7 @@
 #include <rviz/visualization_frame.h>
 #include <rviz/visualization_manager.h>
 #include <rviz/wait_for_master_dialog.h>
+#include <rviz/noetic_eol_dialog.h>
 #include <rviz/ogre_helpers/render_system.h>
 
 #include <rviz/visualizer_app.h>
@@ -100,13 +102,13 @@ bool reloadShaders(std_srvs::Empty::Request& /*unused*/, std_srvs::Empty::Respon
   return true;
 }
 
-VisualizerApp::VisualizerApp() : app_(nullptr), continue_timer_(nullptr), frame_(nullptr)
+VisualizerApp::VisualizerApp() : continue_timer_(nullptr), frame_(nullptr)
 {
 }
 
 void VisualizerApp::setApp(QApplication* app)
 {
-  app_ = app;
+  Q_UNUSED(app);
 }
 
 bool VisualizerApp::init(int argc, char** argv)
@@ -135,20 +137,24 @@ bool VisualizerApp::init(int argc, char** argv)
     int force_gl_version = 0;
 
     po::options_description options;
-    options.add_options()("help,h", "Produce this help message")(
-        "splash-screen,s", po::value<std::string>(&splash_path),
-        "A custom splash-screen image to display")("help-file", po::value<std::string>(&help_path),
-                                                   "A custom html file to show as the help screen")(
-        "display-config,d", po::value<std::string>(&display_config),
-        "A display config file (.rviz) to load")("fullscreen", "Trigger fullscreen display")(
-        "fixed-frame,f", po::value<std::string>(&fixed_frame), "Set the fixed frame")(
-        "ogre-log,l", "Enable the Ogre.log file (output in cwd) and console output.")(
-        "in-mc-wrapper", "Signal that this is running inside a master-chooser wrapper")(
-        "opengl", po::value<int>(&force_gl_version),
-        "Force OpenGL version (use '--opengl 210' for OpenGL 2.1 compatibility mode)")(
-        "disable-anti-aliasing", "Prevent rviz from trying to use anti-aliasing when rendering.")(
-        "no-stereo", "Disable the use of stereo rendering.")("verbose,v", "Enable debug visualizations")(
-        "log-level-debug", "Sets the ROS logger level to debug.");
+    options.add_options() // clang-format off
+      ("help,h", "Produce this help message")
+      ("splash-screen,s", po::value<std::string>(&splash_path),
+       "A custom splash-screen image to display")
+      ("help-file", po::value<std::string>(&help_path),
+       "A custom html file to show as the help screen")
+      ("display-config,d", po::value<std::string>(&display_config),
+       "A display config file (.rviz) to load")
+      ("fullscreen", "Trigger fullscreen display")
+      ("fixed-frame,f", po::value<std::string>(&fixed_frame), "Set the fixed frame")
+      ("ogre-log,l", "Enable the Ogre.log file (output in cwd) and console output.")
+      ("in-mc-wrapper", "Signal that this is running inside a master-chooser wrapper")
+      ("opengl", po::value<int>(&force_gl_version),
+        "Force OpenGL version (use '--opengl 210' for OpenGL 2.1 compatibility mode)")
+      ("disable-anti-aliasing", "Prevent rviz from trying to use anti-aliasing when rendering.")
+      ("no-stereo", "Disable the use of stereo rendering.")("verbose,v", "Enable debug visualizations")
+      ("log-level-debug", "Sets the ROS logger level to debug.");
+    // clang-format on
     po::variables_map vm;
     try
     {
@@ -177,8 +183,8 @@ bool VisualizerApp::init(int argc, char** argv)
 
     if (!ros::master::check())
     {
-      WaitForMasterDialog* dialog = new WaitForMasterDialog;
-      if (dialog->exec() != QDialog::Accepted)
+      WaitForMasterDialog dialog;
+      if (dialog.exec() != QDialog::Accepted)
       {
         return false;
       }
@@ -198,7 +204,6 @@ bool VisualizerApp::init(int argc, char** argv)
       RenderSystem::forceNoStereo();
 
     frame_ = new VisualizationFrame();
-    frame_->setApp(this->app_);
     if (!help_path.empty())
     {
       frame_->setHelpPath(QString::fromStdString(help_path));
@@ -223,8 +228,21 @@ bool VisualizerApp::init(int argc, char** argv)
 
     load_config_service_ =
         private_nh.advertiseService("load_config", &VisualizerApp::loadConfigCallback, this);
+    load_config_discarding_service_ = private_nh.advertiseService(
+        "load_config_discarding_changes", &VisualizerApp::loadConfigDiscardingCallback, this);
     save_config_service_ =
         private_nh.advertiseService("save_config", &VisualizerApp::saveConfigCallback, this);
+
+      // Notify users of ROS 1 EOL Date
+      // Get the environment variables
+      QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+      // If environment variable is not set
+      if(!env.contains("DISABLE_ROS1_EOL_WARNINGS"))
+      {
+        // Create a warning pop up
+        NoeticEOLDialog eol_dialog;
+        eol_dialog.exec();
+      }
 
 #if CATCH_EXCEPTIONS
   }
@@ -246,7 +264,7 @@ VisualizerApp::~VisualizerApp()
 void VisualizerApp::startContinueChecker()
 {
   continue_timer_ = new QTimer(this);
-  connect(continue_timer_, SIGNAL(timeout()), this, SLOT(checkContinue()));
+  connect(continue_timer_, &QTimer::timeout, this, &VisualizerApp::checkContinue);
   continue_timer_->start(100);
 }
 
@@ -268,6 +286,20 @@ bool VisualizerApp::loadConfigCallback(rviz::SendFilePathRequest& req, rviz::Sen
   fs::path path = req.path.data;
   if (fs::is_regular_file(path))
     res.success = frame_->loadDisplayConfigHelper(path.string());
+  else
+    res.success = false;
+  return true;
+}
+
+bool VisualizerApp::loadConfigDiscardingCallback(rviz::SendFilePathRequest& req,
+                                                 rviz::SendFilePathResponse& res)
+{
+  fs::path path = req.path.data;
+  if (fs::is_regular_file(path))
+  {
+    bool discard_changes = true;
+    res.success = frame_->loadDisplayConfigHelper(path.string(), discard_changes);
+  }
   else
     res.success = false;
   return true;

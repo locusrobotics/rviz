@@ -44,18 +44,19 @@ namespace rviz
 {
 PointCloudDisplay::PointCloudDisplay() : point_cloud_common_(new PointCloudCommon(this))
 {
-  // PointCloudCommon sets up a callback queue with a thread for each
-  // instance.  Use that for processing incoming messages.
-  update_nh_.setCallbackQueue(point_cloud_common_->getCallbackQueue());
 }
 
 PointCloudDisplay::~PointCloudDisplay()
 {
+  PointCloudDisplay::unsubscribe();
   delete point_cloud_common_;
 }
 
 void PointCloudDisplay::onInitialize()
 {
+  // Use the threaded queue for processing of incoming messages
+  update_nh_.setCallbackQueue(context_->getThreadedQueue());
+
   MFDClass::onInitialize();
   point_cloud_common_->initialize(context_, scene_node_);
 }

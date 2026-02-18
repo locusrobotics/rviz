@@ -81,25 +81,25 @@ Robot::Robot(Ogre::SceneNode* root_node,
   link_tree_->hide(); // hide until loaded
 
   link_tree_style_ = new EnumProperty("Link Tree Style", "", "How the list of links is displayed",
-                                      link_tree_, SLOT(changedLinkTreeStyle()), this);
+                                      link_tree_, &Robot::changedLinkTreeStyle, this);
   initLinkTreeStyle();
   expand_tree_ = new BoolProperty("Expand Tree", false, "Expand or collapse link tree", link_tree_,
-                                  SLOT(changedExpandTree()), this);
+                                  &Robot::changedExpandTree, this);
   expand_link_details_ =
       new BoolProperty("Expand Link Details", false,
                        "Expand link details (sub properties) to see all info for all links.", link_tree_,
-                       SLOT(changedExpandLinkDetails()), this);
+                       &Robot::changedExpandLinkDetails, this);
   expand_joint_details_ =
       new BoolProperty("Expand Joint Details", false,
                        "Expand joint details (sub properties) to see all info for all joints.",
-                       link_tree_, SLOT(changedExpandJointDetails()), this);
+                       link_tree_, &Robot::changedExpandJointDetails, this);
   enable_all_links_ = new BoolProperty("All Links Enabled", true, "Turn all links on or off.",
-                                       link_tree_, SLOT(changedEnableAllLinks()), this);
+                                       link_tree_, &Robot::changedEnableAllLinks, this);
 }
 
 Robot::~Robot()
 {
-  clear();
+  Robot::clear();
 
   scene_manager_->destroySceneNode(root_visual_node_);
   scene_manager_->destroySceneNode(root_collision_node_);
@@ -666,7 +666,6 @@ void Robot::calculateJointCheckboxes()
     links_with_geom_checked += checked ? 1 : 0;
     links_with_geom_unchecked += checked ? 0 : 1;
   }
-  int links_with_geom = links_with_geom_checked + links_with_geom_unchecked;
 
   // check all child links and joints recursively
   std::vector<std::string>::const_iterator child_joint_it = link->getChildJointNames().begin();
@@ -685,7 +684,7 @@ void Robot::calculateJointCheckboxes()
       links_with_geom_unchecked += child_links_with_geom_unchecked;
     }
   }
-  links_with_geom = links_with_geom_checked + links_with_geom_unchecked;
+  int links_with_geom = links_with_geom_checked + links_with_geom_unchecked;
 
   if (!links_with_geom)
   {
@@ -705,13 +704,13 @@ void Robot::update(const LinkUpdater& updater)
   {
     RobotLink* link = link_it->second;
 
-    link->setToNormalMaterial();
-
     Ogre::Vector3 visual_position, collision_position;
     Ogre::Quaternion visual_orientation, collision_orientation;
     if (updater.getLinkTransforms(link->getName(), visual_position, visual_orientation,
                                   collision_position, collision_orientation))
     {
+      link->setToNormalMaterial();
+
       // Check if visual_orientation, visual_position, collision_orientation, and collision_position are
       // NaN.
       if (visual_orientation.isNaN())

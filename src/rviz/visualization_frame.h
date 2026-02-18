@@ -78,7 +78,7 @@ public:
   VisualizationFrame(QWidget* parent = nullptr);
   ~VisualizationFrame() override;
 
-  void setApp(QApplication* app);
+  [[deprecated("setApp() not needed anymore")]] void setApp(QApplication* app);
 
   /** @brief Call this @e before initialize() to have it take effect. */
   void setShowChooseNewMaster(bool show);
@@ -114,12 +114,12 @@ public:
   PanelDockWidget* addPane(const QString& name,
                            QWidget* panel,
                            Qt::DockWidgetArea area = Qt::LeftDockWidgetArea,
-                           bool floating = true) override;
+                           bool floating = false) override;
 
   QDockWidget* addPanelByName(const QString& name,
                               const QString& class_lookup_name,
                               Qt::DockWidgetArea area = Qt::LeftDockWidgetArea,
-                              bool floating = true);
+                              bool floating = false);
 
   /** @brief Load the "general" config file, which has just the few
    * things which should not be saved with a display config.
@@ -139,8 +139,10 @@ public:
   void loadDisplayConfig(const QString& path);
 
   /** @brief Load display and other settings from the given full file path.
+   * @param full_path The (absolute) path to the config file to load
+   * @param discard_changes Flag indicating whether to discard any unsaved config changes
    * @return True on success, False on failure. */
-  bool loadDisplayConfigHelper(const std::string& full_path);
+  bool loadDisplayConfigHelper(const std::string& full_path, const bool discard_changes = false);
 
   /** @brief Save display and other settings to the given file.
    * @param path The full path of the config file to save into.
@@ -195,6 +197,9 @@ Q_SIGNALS:
 
   /** @brief Emitted when the interface enters or leaves full screen mode. */
   void fullScreenChange(bool hidden);
+
+  /** @brief Emitted when the config file has changed */
+  void displayConfigFileChanged(const QString& fullpath);
 
 protected Q_SLOTS:
   void onOpen();
@@ -264,6 +269,7 @@ protected Q_SLOTS:
 
   void reset();
 
+  void onPanelDeleted(QObject* dock);
   void onHelpDestroyed();
 
   void hideLeftDock(bool hide);
@@ -321,8 +327,6 @@ protected:
   void setDisplayConfigFile(const std::string& path);
 
   void hideDockImpl(Qt::DockWidgetArea area, bool hide);
-
-  QApplication* app_;
 
   RenderPanel* render_panel_;
 

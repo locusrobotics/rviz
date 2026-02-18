@@ -40,10 +40,12 @@ add_library(${PROJECT_NAME}
   help_panel.cpp
   image/ros_image_texture.cpp
   image/image_display_base.cpp
+  image/mouse_click.cpp
   loading_dialog.cpp
   message_filter_display.h
   mesh_loader.cpp
   new_object_dialog.cpp
+  noetic_eol_dialog.cpp
   add_display_dialog.cpp
   ogre_helpers/apply_visibility_bits.cpp
   ogre_helpers/arrow.cpp
@@ -128,9 +130,6 @@ add_library(${PROJECT_NAME}
 include(GenerateExportHeader)
 set(EXPORT_FILE_NAME ${EXPORT_HEADER_DIR}/rviz/${PROJECT_NAME}_export.h)
 generate_export_header(${PROJECT_NAME} EXPORT_FILE_NAME ${EXPORT_FILE_NAME})
-if(NOT WIN32)
-  set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-std=c++11")
-endif()
 
 target_link_libraries(${PROJECT_NAME}
   ${Boost_LIBRARIES}
@@ -154,10 +153,6 @@ endif(APPLE)
 
 ########### The rviz executable ###########
 add_executable(executable main.cpp)
-
-if(NOT WIN32)
-  set_target_properties(executable PROPERTIES COMPILE_FLAGS "-std=c++11")
-endif()
 
 target_link_libraries(executable ${PROJECT_NAME} ${QT_LIBRARIES} ${OGRE_LIBRARIES})
 

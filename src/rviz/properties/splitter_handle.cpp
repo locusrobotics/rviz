@@ -33,6 +33,7 @@
 #include <QPainter>
 #include <QTreeView>
 #include <QHeaderView>
+#include <QScrollBar>
 
 #include <rviz/properties/splitter_handle.h>
 
@@ -42,16 +43,14 @@ SplitterHandle::SplitterHandle(QTreeView* parent)
   : QWidget(parent), parent_(parent), first_column_size_ratio_(0.5f), color_(128, 128, 128, 64)
 {
   setCursor(Qt::SplitHCursor);
-  updateGeometry();
   parent_->header()->setStretchLastSection(false);
-  parent_->installEventFilter(this);
+  parent_->viewport()->installEventFilter(this);
+  updateGeometry();
 }
 
-bool SplitterHandle::eventFilter(QObject* event_target, QEvent* event)
+bool SplitterHandle::eventFilter(QObject* /*event_target*/, QEvent* event)
 {
-  if (event_target == parent_ &&
-      (event->type() == QEvent::Resize || event->type() == QEvent::LayoutRequest ||
-       event->type() == QEvent::Show))
+  if (event->type() == QEvent::Resize)
   {
     updateGeometry();
   }
@@ -60,14 +59,39 @@ bool SplitterHandle::eventFilter(QObject* event_target, QEvent* event)
 
 void SplitterHandle::updateGeometry()
 {
-  int w = 7;
-  int new_column_width = int(first_column_size_ratio_ * parent_->contentsRect().width());
-  parent_->setColumnWidth(0, new_column_width);
-  parent_->setColumnWidth(1, parent_->viewport()->contentsRect().width() - new_column_width);
+  auto* header = parent_->header();
+  const int sbw = parent_->verticalScrollBar()->isVisible() ? 0 : parent_->verticalScrollBar()->width();
+  const int w = 7;
+  const int min = header->minimumSectionSize();
+  const int available = parent_->viewport()->contentsRect().width();
+  const auto& content = parent_->contentsRect();
 
-  int new_x = new_column_width - w / 2 + parent_->columnViewportPosition(0);
-  if (new_x != x() || parent_->height() != height())
-    setGeometry(new_x, 0, w, parent_->height());
+  // determine new width of first column (w.r.t. overall content width!)
+  int new_column_width = int(first_column_size_ratio_ * content.width());
+  if (new_column_width <= 0)
+    new_column_width = 0;
+  else if (new_column_width >= available)
+    new_column_width = available;
+  else
+    new_column_width = qBound(min,                    // minimum
+                              new_column_width,       // desired
+                              available - min - sbw); // maximum
+
+  if (new_column_width > header->sectionSize(0))
+  { // decrease 2nd column before increasing 1st one
+    header->resizeSection(1, available - new_column_width);
+    header->resizeSection(0, new_column_width);
+  }
+  else
+  { // decrease 1st column before increasing 2nd one
+    header->resizeSection(0, new_column_width);
+    header->resizeSection(1, available - new_column_width);
+  }
+
+  // update geometry + position of splitter itself
+  int new_x = content.x() + new_column_width - w / 2;
+  if (new_x != x() || content.height() != height())
+    setGeometry(new_x, content.y(), w, content.height());
 }
 
 void SplitterHandle::setRatio(float ratio)
@@ -81,49 +105,52 @@ float SplitterHandle::getRatio()
   return first_column_size_ratio_;
 }
 
+void SplitterHandle::setDesiredWidth(int width)
+{
+  first_column_size_ratio_ = width / (float)parent_->contentsRect().width();
+  updateGeometry();
+}
+
 void SplitterHandle::mousePressEvent(QMouseEvent* event)
 {
   if (event->button() == Qt::LeftButton)
   {
-    // position of mouse press inside this QWidget
-    x_press_offset_ = event->x();
+    // position of mouse press relative to splitter line / the center of the widget
+    x_press_offset_ = event->x() - width() / 2;
   }
 }
 
 void SplitterHandle::mouseMoveEvent(QMouseEvent* event)
 {
-  int padding = 55;
-
   if (event->buttons() & Qt::LeftButton)
   {
     QPoint pos_rel_parent = parent_->mapFromGlobal(event->globalPos());
-
-    int new_x = pos_rel_parent.x() - x_press_offset_ - parent_->columnViewportPosition(0);
-
-    if (new_x > parent_->width() - width() - padding)
-    {
-      new_x = parent_->width() - width() - padding;
-    }
-
-    if (new_x < padding)
-    {
-      new_x = padding;
-    }
-
-    if (new_x != x())
-    {
-      int new_column_width = new_x + width() / 2 - parent_->contentsRect().x();
-      first_column_size_ratio_ = new_column_width / (float)parent_->contentsRect().width();
-      updateGeometry();
-    }
+    setDesiredWidth(pos_rel_parent.x() - parent_->contentsRect().x() - x_press_offset_);
   }
+}
+
+// adjust splitter position to optimally fit content
+void SplitterHandle::mouseDoubleClickEvent(QMouseEvent* /*event*/)
+{
+  int available_width = parent_->contentsRect().width();
+  int default_width = 0.5f * available_width;
+  // missing width to default
+  int col0 = static_cast<QAbstractItemView*>(parent_)->sizeHintForColumn(0) - default_width;
+  int col1 = static_cast<QAbstractItemView*>(parent_)->sizeHintForColumn(1) - default_width;
+
+  if (col0 <= 0 && col1 <= 0) // each column fits
+    setDesiredWidth(default_width);
+  else if (col0 + col1 <= 0) // both columns fit together, but require a non-default splitting
+    setDesiredWidth(default_width + col0 + 0.5f * std::abs(col0 + col1)); // uniformly split extra space
+  else
+    setDesiredWidth(default_width + col0 - 0.5f * (col0 + col1)); // uniformly cut missing space
 }
 
 void SplitterHandle::paintEvent(QPaintEvent* /*event*/)
 {
   QPainter painter(this);
   painter.setPen(color_);
-  painter.drawLine(1 + width() / 2, 0, 1 + width() / 2, height());
+  painter.drawLine(width() / 2, 0, width() / 2, height());
 }
 
 } // end namespace rviz

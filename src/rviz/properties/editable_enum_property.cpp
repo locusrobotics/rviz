@@ -28,9 +28,8 @@
  */
 
 #include <QCompleter>
-
+#include <QLineEdit>
 #include <rviz/properties/editable_combo_box.h>
-
 #include <rviz/properties/editable_enum_property.h>
 
 namespace rviz
@@ -38,10 +37,8 @@ namespace rviz
 EditableEnumProperty::EditableEnumProperty(const QString& name,
                                            const QString& default_value,
                                            const QString& description,
-                                           Property* parent,
-                                           const char* changed_slot,
-                                           QObject* receiver)
-  : StringProperty(name, default_value, description, parent, changed_slot, receiver)
+                                           Property* parent)
+  : StringProperty(name, default_value, description, parent)
 {
 }
 
@@ -61,12 +58,14 @@ QWidget* EditableEnumProperty::createEditor(QWidget* parent, const QStyleOptionV
   Q_EMIT requestOptions(this);
 
   EditableComboBox* cb = new EditableComboBox(parent);
+  // avoid shifting of text when line edit becomes active (#1599)
+  cb->lineEdit()->setTextMargins(0, -1, 0, 0);
   // avoid larger comboxbox than column width of PropertyWidget
   cb->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
   cb->addItems(strings_);
   cb->setEditText(getValue().toString());
-  QObject::connect(cb, SIGNAL(currentIndexChanged(const QString&)), this,
-                   SLOT(setString(const QString&)));
+  QObject::connect(cb, qOverload<int>(&QComboBox::currentIndexChanged), this,
+                   [this, cb](int idx) { setString(cb->itemText(idx)); });
 
   // TODO: need to better handle string value which is not in list.
   return cb;

@@ -35,6 +35,7 @@
 
 #include <rviz/display_context.h>
 #include <rviz/robot/robot.h>
+#include <rviz/robot/robot_link.h>
 #include <rviz/robot/tf_link_updater.h>
 #include <rviz/properties/float_property.h>
 #include <rviz/properties/property.h>
@@ -57,12 +58,12 @@ RobotModelDisplay::RobotModelDisplay()
 {
   visual_enabled_property_ =
       new Property("Visual Enabled", true, "Whether to display the visual representation of the robot.",
-                   this, SLOT(updateVisualVisible()));
+                   this, &RobotModelDisplay::updateVisualVisible);
 
   collision_enabled_property_ =
       new Property("Collision Enabled", false,
                    "Whether to display the collision representation of the robot.", this,
-                   SLOT(updateCollisionVisible()));
+                   &RobotModelDisplay::updateCollisionVisible);
 
   update_rate_property_ = new FloatProperty("Update Interval", 0,
                                             "Interval at which to update the links, in seconds. "
@@ -71,20 +72,20 @@ RobotModelDisplay::RobotModelDisplay()
   update_rate_property_->setMin(0);
 
   alpha_property_ = new FloatProperty("Alpha", 1, "Amount of transparency to apply to the links.", this,
-                                      SLOT(updateAlpha()));
+                                      &RobotModelDisplay::updateAlpha);
   alpha_property_->setMin(0.0);
   alpha_property_->setMax(1.0);
 
   robot_description_property_ =
       new StringProperty("Robot Description", "robot_description",
                          "Name of the parameter to search for to load the robot description.", this,
-                         SLOT(updateRobotDescription()));
+                         &RobotModelDisplay::updateRobotDescription);
 
   tf_prefix_property_ = new StringProperty(
       "TF Prefix", "",
       "Robot Model normally assumes the link name is the same as the tf frame name. "
       " This option allows you to set a prefix.  Mainly useful for multi-robot situations.",
-      this, SLOT(updateTfPrefix()));
+      this, &RobotModelDisplay::updateTfPrefix);
 }
 
 RobotModelDisplay::~RobotModelDisplay()
@@ -154,7 +155,7 @@ void RobotModelDisplay::load()
                   QString("Parameter [%1] does not exist, and was not found by searchParam()")
                       .arg(robot_description_property_->getString()));
         // try again in a second
-        QTimer::singleShot(1000, this, SLOT(updateRobotDescription()));
+        QTimer::singleShot(1000, this, &RobotModelDisplay::updateRobotDescription);
         return;
       }
     }
@@ -192,8 +193,20 @@ void RobotModelDisplay::load()
 
   setStatus(StatusProperty::Ok, "URDF", "URDF parsed OK");
   robot_->load(descr);
+  std::stringstream ss;
+  for (const auto& name_link_pair : robot_->getLinks())
+  {
+    const std::string& err = name_link_pair.second->getGeometryErrors();
+    if (!err.empty())
+      ss << "\n• for link '" << name_link_pair.first << "':\n" << err;
+  }
+  if (ss.tellp())
+    setStatus(StatusProperty::Error, "URDF",
+              QString("Errors loading geometries:").append(ss.str().c_str()));
+
   robot_->update(TFLinkUpdater(context_->getFrameManager(),
-                               boost::bind(linkUpdaterStatusFunction, _1, _2, _3, this),
+                               boost::bind(linkUpdaterStatusFunction, boost::placeholders::_1,
+                                           boost::placeholders::_2, boost::placeholders::_3, this),
                                tf_prefix_property_->getStdString()));
 }
 
@@ -218,7 +231,8 @@ void RobotModelDisplay::update(float wall_dt, float /*ros_dt*/)
   if (has_new_transforms_ || update)
   {
     robot_->update(TFLinkUpdater(context_->getFrameManager(),
-                                 boost::bind(linkUpdaterStatusFunction, _1, _2, _3, this),
+                                 boost::bind(linkUpdaterStatusFunction, boost::placeholders::_1,
+                                             boost::placeholders::_2, boost::placeholders::_3, this),
                                  tf_prefix_property_->getStdString()));
     context_->queueRender();
 

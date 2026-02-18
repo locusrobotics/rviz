@@ -29,7 +29,7 @@
 
 #include <OgreColourValue.h>
 #include <OgreMatrix4.h>
-#include <OgreVector3.h>
+#include <rviz/ogre_helpers/ogre_vector.h>
 
 #include <rviz/properties/bool_property.h>
 #include <rviz/properties/color_property.h>
@@ -186,42 +186,45 @@ void IntensityPCTransformer::createProperties(Property* parent_property,
     channel_name_property_ =
         new EditableEnumProperty("Channel Name", "intensity",
                                  "Select the channel to use to compute the intensity", parent_property,
-                                 SIGNAL(needRetransform()), this);
+                                 &IntensityPCTransformer::needRetransform, this);
 
     use_rainbow_property_ =
         new BoolProperty("Use rainbow", true,
                          "Whether to use a rainbow of colors or interpolate between two",
-                         parent_property, SLOT(updateUseRainbow()), this);
+                         parent_property, &IntensityPCTransformer::updateUseRainbow, this);
     invert_rainbow_property_ =
         new BoolProperty("Invert Rainbow", false, "Whether to invert rainbow colors", parent_property,
-                         SLOT(updateUseRainbow()), this);
+                         &IntensityPCTransformer::updateUseRainbow, this);
 
-    min_color_property_ = new ColorProperty("Min Color", Qt::black,
-                                            "Color to assign the points with the minimum intensity.  "
-                                            "Actual color is interpolated between this and Max Color.",
-                                            parent_property, SIGNAL(needRetransform()), this);
+    min_color_property_ =
+        new ColorProperty("Min Color", Qt::black,
+                          "Color to assign the points with the minimum intensity.  "
+                          "Actual color is interpolated between this and Max Color.",
+                          parent_property,
+                          &IntensityPCTransformer::IntensityPCTransformer::needRetransform, this);
 
-    max_color_property_ = new ColorProperty("Max Color", Qt::white,
-                                            "Color to assign the points with the maximum intensity.  "
-                                            "Actual color is interpolated between this and Min Color.",
-                                            parent_property, SIGNAL(needRetransform()), this);
+    max_color_property_ =
+        new ColorProperty("Max Color", Qt::white,
+                          "Color to assign the points with the maximum intensity.  "
+                          "Actual color is interpolated between this and Min Color.",
+                          parent_property,
+                          &IntensityPCTransformer::IntensityPCTransformer::needRetransform, this);
 
     auto_compute_intensity_bounds_property_ =
         new BoolProperty("Autocompute Intensity Bounds", true,
                          "Whether to automatically compute the intensity min/max values.",
-                         parent_property, SLOT(updateAutoComputeIntensityBounds()), this);
+                         parent_property, &IntensityPCTransformer::updateAutoComputeIntensityBounds,
+                         this);
 
     min_intensity_property_ = new FloatProperty(
         "Min Intensity", 0,
         "Minimum possible intensity value, used to interpolate from Min Color to Max Color for a point.",
         parent_property);
-    min_intensity_property_->setReadOnly(true);
 
     max_intensity_property_ = new FloatProperty(
         "Max Intensity", 4096,
         "Maximum possible intensity value, used to interpolate from Min Color to Max Color for a point.",
         parent_property);
-    max_intensity_property_->setReadOnly(true);
 
     out_props.push_back(channel_name_property_);
     out_props.push_back(use_rainbow_property_);
@@ -265,17 +268,19 @@ void IntensityPCTransformer::updateChannels(const sensor_msgs::PointCloud2ConstP
 void IntensityPCTransformer::updateAutoComputeIntensityBounds()
 {
   bool auto_compute = auto_compute_intensity_bounds_property_->getBool();
-  min_intensity_property_->setHidden(auto_compute);
-  max_intensity_property_->setHidden(auto_compute);
+  min_intensity_property_->setReadOnly(auto_compute);
+  max_intensity_property_->setReadOnly(auto_compute);
   if (auto_compute)
   {
-    disconnect(min_intensity_property_, SIGNAL(changed()), this, SIGNAL(needRetransform()));
-    disconnect(max_intensity_property_, SIGNAL(changed()), this, SIGNAL(needRetransform()));
+    disconnect(min_intensity_property_, &Property::changed, this,
+               &IntensityPCTransformer::needRetransform);
+    disconnect(max_intensity_property_, &Property::changed, this,
+               &IntensityPCTransformer::needRetransform);
   }
   else
   {
-    connect(min_intensity_property_, SIGNAL(changed()), this, SIGNAL(needRetransform()));
-    connect(max_intensity_property_, SIGNAL(changed()), this, SIGNAL(needRetransform()));
+    connect(min_intensity_property_, &Property::changed, this, &IntensityPCTransformer::needRetransform);
+    connect(max_intensity_property_, &Property::changed, this, &IntensityPCTransformer::needRetransform);
   }
   Q_EMIT needRetransform();
 }
@@ -553,7 +558,7 @@ void FlatColorPCTransformer::createProperties(Property* parent_property,
   if (mask & Support_Color)
   {
     color_property_ = new ColorProperty("Color", Qt::white, "Color to assign to every point.",
-                                        parent_property, SIGNAL(needRetransform()), this);
+                                        parent_property, &IntensityPCTransformer::needRetransform, this);
     out_props.push_back(color_property_);
   }
 }
@@ -658,7 +663,7 @@ void AxisColorPCTransformer::createProperties(Property* parent_property,
   if (mask & Support_Color)
   {
     axis_property_ = new EnumProperty("Axis", "Z", "The axis to interpolate the color along.",
-                                      parent_property, SIGNAL(needRetransform()), this);
+                                      parent_property, &IntensityPCTransformer::needRetransform, this);
     axis_property_->addOption("X", AXIS_X);
     axis_property_->addOption("Y", AXIS_Y);
     axis_property_->addOption("Z", AXIS_Z);
@@ -666,7 +671,7 @@ void AxisColorPCTransformer::createProperties(Property* parent_property,
     auto_compute_bounds_property_ =
         new BoolProperty("Autocompute Value Bounds", true,
                          "Whether to automatically compute the value min/max values.", parent_property,
-                         SLOT(updateAutoComputeBounds()), this);
+                         &AxisColorPCTransformer::updateAutoComputeBounds, this);
 
     min_value_property_ =
         new FloatProperty("Min Value", -10,
@@ -681,7 +686,7 @@ void AxisColorPCTransformer::createProperties(Property* parent_property,
     use_fixed_frame_property_ = new BoolProperty(
         "Use Fixed Frame", true,
         "Whether to color the cloud based on its fixed frame position or its local frame position.",
-        parent_property, SIGNAL(needRetransform()), this);
+        parent_property, &IntensityPCTransformer::needRetransform, this);
 
     out_props.push_back(axis_property_);
     out_props.push_back(auto_compute_bounds_property_);
@@ -698,13 +703,13 @@ void AxisColorPCTransformer::updateAutoComputeBounds()
   max_value_property_->setHidden(auto_compute);
   if (auto_compute)
   {
-    disconnect(min_value_property_, SIGNAL(changed()), this, SIGNAL(needRetransform()));
-    disconnect(max_value_property_, SIGNAL(changed()), this, SIGNAL(needRetransform()));
+    disconnect(min_value_property_, &Property::changed, this, &AxisColorPCTransformer::needRetransform);
+    disconnect(max_value_property_, &Property::changed, this, &AxisColorPCTransformer::needRetransform);
   }
   else
   {
-    connect(min_value_property_, SIGNAL(changed()), this, SIGNAL(needRetransform()));
-    connect(max_value_property_, SIGNAL(changed()), this, SIGNAL(needRetransform()));
+    connect(min_value_property_, &Property::changed, this, &AxisColorPCTransformer::needRetransform);
+    connect(max_value_property_, &Property::changed, this, &AxisColorPCTransformer::needRetransform);
     auto_compute_bounds_property_->expand();
   }
   Q_EMIT needRetransform();

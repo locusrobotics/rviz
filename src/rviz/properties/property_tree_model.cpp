@@ -29,6 +29,7 @@
 
 #include <stdio.h>
 
+#include <QIODevice>
 #include <QStringList>
 #include <QMimeData>
 
@@ -108,10 +109,6 @@ QModelIndex PropertyTreeModel::parentIndex(const Property* child) const
     return QModelIndex();
   }
   Property* parent = child->getParent();
-  if (parent == root_property_ || !parent)
-  {
-    return QModelIndex();
-  }
   return indexOf(parent);
 }
 
@@ -154,7 +151,14 @@ bool PropertyTreeModel::setData(const QModelIndex& index, const QVariant& value,
     return false;
   }
 
-  return property->setValue(value);
+  if (index.column() != 0)
+    return property->setValue(value);
+  else if (value.type() == QVariant::String)
+  {
+    property->setName(value.toString());
+    return true;
+  }
+  return false;
 }
 
 /** @brief Override from QAbstractItemModel.  Returns a
